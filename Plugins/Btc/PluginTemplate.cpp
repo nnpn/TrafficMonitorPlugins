@@ -28,12 +28,21 @@ IPluginItem* CPluginTemplate::GetItem(int index)
 
 const wchar_t* CPluginTemplate::GetTooltipInfo()
 {
+    m_tooltip_info = g_data.GetTooltipText();
     return m_tooltip_info.c_str();
 }
 
 void CPluginTemplate::DataRequired()
 {
-    //TODO: 在此添加获取监控数据的代码
+    // Phase 1：仅使用模拟数据刷新渲染缓存，确保 UI 行为可验收。
+    static time_t last_tick{};
+    time_t now = time(nullptr);
+    if (now != last_tick)
+    {
+        last_tick = now;
+        g_data.UpdateMockQuotes();
+        m_tooltip_info = g_data.GetTooltipText();
+    }
 }
 
 ITMPlugin::OptionReturn CPluginTemplate::ShowOptionsDialog(void* hParent)
@@ -81,6 +90,10 @@ void CPluginTemplate::OnExtenedInfo(ExtendedInfoIndex index, const wchar_t* data
     case ITMPlugin::EI_CONFIG_DIR:
         //从配置文件读取配置
         g_data.LoadConfig(std::wstring(data));
+        m_tooltip_info = g_data.GetTooltipText();
+        break;
+    case ITMPlugin::EI_TASKBAR_WND_VALUE_RIGHT_ALIGN:
+        g_data.SetRightAlign((_wtoi(data) != 0));
         break;
     default:
         break;
