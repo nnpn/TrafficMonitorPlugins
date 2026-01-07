@@ -19,6 +19,57 @@ namespace
     constexpr auto kUserAgent = L"TrafficMonitorPlugins-Btc/0.1";
     constexpr DWORD kInternetFlags = INTERNET_FLAG_TRANSFER_ASCII | INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_SECURE;
 
+    bool FileExists(const std::wstring& path)
+    {
+        DWORD attr = GetFileAttributesW(path.c_str());
+        return (attr != INVALID_FILE_ATTRIBUTES) && ((attr & FILE_ATTRIBUTE_DIRECTORY) == 0);
+    }
+
+    bool WriteUtf8BomTextFile(const std::wstring& path, const std::wstring& content)
+    {
+        std::ofstream file(path, std::ios::binary);
+        if (!file)
+            return false;
+
+        const unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
+        file.write((const char*)bom, sizeof(bom));
+
+        std::string utf8 = utilities::StringHelper::UnicodeToStr(content.c_str(), true);
+        file.write(utf8.data(), (std::streamsize)utf8.size());
+        return true;
+    }
+
+    std::wstring BuildDefaultConfigTemplate()
+    {
+        // 注：ini 使用 UTF-8(BOM) 保存；注释行以 ';' 开头。
+        std::wstringstream wss;
+        wss
+            << L"; Btc plugin config (auto-generated)\n"
+            << L";\n"
+            << L"; symbols: 监控列表，格式为英文逗号分隔且每项带引号：\"BTCUSDT\",\"ETHUSDT\"\n"
+            << L"; active_symbol: 任务栏聚焦币种（必须是 symbols 里的一个）\n"
+            << L"; update_interval_sec: 报价刷新间隔（秒）\n"
+            << L"; tooltip_max_coins: Tooltip 概览最多展示币种数量\n"
+            << L"; stale_threshold_sec: 超过该秒数未更新则标记为过期(*)\n"
+            << L"; second_line_dual_symbol: true=第二行显示下一个币种核心行；false=预留给明细滚动模式\n"
+            << L"\n"
+            << L"[config]\n"
+            << L"symbols = \"BTCUSDT\",\"ETHUSDT\",\"SOLUSDT\"\n"
+            << L"active_symbol = \"BTCUSDT\"\n"
+            << L"update_interval_sec = 5\n"
+            << L"tooltip_max_coins = 8\n"
+            << L"stale_threshold_sec = 30\n"
+            << L"second_line_dual_symbol = true\n"
+            << L"\n"
+            << L"[debug]\n"
+            << L"; log_enabled: 输出调试日志到 <dllname>.log\n"
+            << L"log_enabled = false\n"
+            << L"log_level = 1\n"
+            << L"; dump_last_response: 保存最近一次 HTTP 响应到 <dllname>.last_response.json\n"
+            << L"dump_last_response = false\n";
+        return wss.str();
+    }
+
     bool HttpGet(const std::wstring& url, std::string& out, std::wstring& error)
     {
         out.clear();
@@ -220,8 +271,32 @@ void CDataManager::LoadConfig(const std::wstring& config_dir)
     const std::wstring& base_dir = config_dir.empty() ? module_dir : config_dir;
     m_config_path = base_dir + module_file_name + L".ini";
     m_log_path = base_dir + module_file_name + L".log";
+    m_last_response_path = base_dir + module_file_name + L".last_response.json";
+
+    // 首次运行自动生成模板（带注释），便于直接修改
+    if (!FileExists(m_config_path))
+    {
+        WriteUtf8BomTextFile(m_config_path, BuildDefaultConfigTemplate());
+    }
 
     utilities::CIniHelper ini(m_config_path);
+    if (ini.IsEmpty())
+    {
+        // 文件存在但为空/不可读时重建模板
+        WriteUtf8BomTextFile(m_config_path, BuildDefaultConfigTemplate());
+        utilities::CIniHelper ini2(m_config_path);
+        ini2.GetStringList(L"config", L"symbols", m_setting_data.symbols, std::vector<std::wstring>{});
+        m_setting_data.active_symbol = ini2.GetString(L"config", L"active_symbol", L"");
+        m_setting_data.update_interval_sec = ini2.GetInt(L"config", L"update_interval_sec", 5);
+        m_setting_data.tooltip_max_coins = ini2.GetInt(L"config", L"tooltip_max_coins", 8);
+        m_setting_data.stale_threshold_sec = ini2.GetInt(L"config", L"stale_threshold_sec", 30);
+        m_setting_data.second_line_dual_symbol = ini2.GetBool(L"config", L"second_line_dual_symbol", true);
+        m_setting_data.debug_log_enabled = ini2.GetBool(L"debug", L"log_enabled", false);
+        m_setting_data.debug_log_level = ini2.GetInt(L"debug", L"log_level", 1);
+        m_setting_data.debug_dump_last_response = ini2.GetBool(L"debug", L"dump_last_response", false);
+    }
+    else
+    {
     ini.GetStringList(L"config", L"symbols", m_setting_data.symbols, std::vector<std::wstring>{});
     m_setting_data.active_symbol = ini.GetString(L"config", L"active_symbol", L"");
     m_setting_data.update_interval_sec = ini.GetInt(L"config", L"update_interval_sec", 5);
@@ -230,6 +305,8 @@ void CDataManager::LoadConfig(const std::wstring& config_dir)
     m_setting_data.second_line_dual_symbol = ini.GetBool(L"config", L"second_line_dual_symbol", true);
     m_setting_data.debug_log_enabled = ini.GetBool(L"debug", L"log_enabled", false);
     m_setting_data.debug_log_level = ini.GetInt(L"debug", L"log_level", 1);
+    m_setting_data.debug_dump_last_response = ini.GetBool(L"debug", L"dump_last_response", false);
+    }
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -271,6 +348,7 @@ void CDataManager::SaveConfig() const
         ini.WriteBool(L"config", L"second_line_dual_symbol", m_setting_data.second_line_dual_symbol);
         ini.WriteBool(L"debug", L"log_enabled", m_setting_data.debug_log_enabled);
         ini.WriteInt(L"debug", L"log_level", m_setting_data.debug_log_level);
+        ini.WriteBool(L"debug", L"dump_last_response", m_setting_data.debug_dump_last_response);
     }
     ini.Save();
 }
@@ -511,10 +589,12 @@ int CDataManager::GetEffectiveIntervalSec() const
 bool CDataManager::RequestRealtimeQuotes()
 {
     std::vector<std::wstring> symbols;
+    bool dump_last_response{};
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         EnsureDefaultsLocked();
         symbols = m_setting_data.symbols;
+        dump_last_response = m_setting_data.debug_dump_last_response;
     }
     if (symbols.empty())
         return false;
@@ -542,6 +622,17 @@ bool CDataManager::RequestRealtimeQuotes()
 
     std::map<std::wstring, Quote> parsed;
     std::wstring parse_err;
+
+    // 调试：落盘保存最近一次响应，便于排查字段变化/限流等问题
+    if (dump_last_response && !m_last_response_path.empty())
+    {
+        std::ofstream file(m_last_response_path, std::ios::binary);
+        if (file)
+        {
+            file.write(body.data(), (std::streamsize)body.size());
+        }
+    }
+
     if (!ParseBinance24hr(body, parsed, parse_err))
     {
         DebugLog(1, L"ParseBinance24hr failed: %s", parse_err.c_str());

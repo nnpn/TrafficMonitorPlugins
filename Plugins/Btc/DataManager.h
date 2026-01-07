@@ -65,6 +65,7 @@ struct SettingData
     // Debug 开关
     bool debug_log_enabled{ false };
     int debug_log_level{ 1 };
+    bool debug_dump_last_response{ false };    // 保存最近一次 HTTP 响应到文件（仅用于调试）
 };
 
 class CDataManager
@@ -152,6 +153,7 @@ private:
     static CDataManager m_instance;
     std::wstring m_config_path;
     std::wstring m_log_path;
+    std::wstring m_last_response_path;
     std::map<UINT, CString> m_string_table;
     std::map<UINT, HICON> m_icons;
     int m_dpi{ 96 };
