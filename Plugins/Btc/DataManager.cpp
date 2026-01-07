@@ -148,8 +148,14 @@ namespace
         wss
             << L"; Btc plugin config (auto-generated)\n"
             << L";\n"
-            << L"; symbols: 监控列表，格式为英文逗号分隔且每项带引号：\"BTCUSDT\",\"ETHUSDT\"\n"
+            << L"; provider: 数据源：binance / cryptocompare\n"
+            << L"; symbols:\n"
+            << L";   - provider=binance: 交易对，例如 \"BTCUSDT\",\"ETHUSDT\"\n"
+            << L";   - provider=cryptocompare: 基础币种代码，例如 \"BTC\",\"ETH\"（会按 quote_currency 换算）\n"
             << L"; active_symbol: 任务栏聚焦币种（必须是 symbols 里的一个）\n"
+            << L"; quote_currency: 法币/计价单位：例如 USD/CNY/USDT\n"
+            << L"; binance_base_url / cryptocompare_base_url: 自定义 API 地址（用于调试/兼容网络环境）\n"
+            << L"; cryptocompare_api_key: 可选 API Key（频率高时建议配置）\n"
             << L"; update_interval_sec: 报价刷新间隔（秒）\n"
             << L"; tooltip_max_coins: Tooltip 概览最多展示币种数量\n"
             << L"; tooltip_sort: Tooltip 概览排序：watchlist / symbol_asc / change_pct_desc / change_pct_asc\n"
@@ -164,9 +170,14 @@ namespace
             << L"; up_is_red: true=涨红跌绿；false=涨绿跌红\n"
             << L"\n"
             << L"[config]\n"
+            << L"provider = binance\n"
             << L"symbols = \"BTCUSDT\",\"ETHUSDT\",\"SOLUSDT\"\n"
             << L"active_symbol = \"BTCUSDT\"\n"
-            << L"update_interval_sec = 5\n"
+            << L"quote_currency = \"USDT\"\n"
+            << L"binance_base_url = \"https://api.binance.com\"\n"
+            << L"cryptocompare_base_url = \"https://min-api.cryptocompare.com\"\n"
+            << L"; cryptocompare_api_key = \"YOUR_KEY\"\n"
+            << L"update_interval_sec = 10\n"
             << L"tooltip_max_coins = 8\n"
             << L"tooltip_sort = watchlist\n"
             << L"tooltip_show_focus = true\n"
@@ -320,6 +331,108 @@ namespace
         return true;
     }
 
+    bool ParseCryptoCompareMultiFull(const std::string& json, const std::wstring& quote_currency_upper, std::map<std::wstring, Quote>& out, std::wstring& error)
+    {
+        out.clear();
+        error.clear();
+
+        yyjson_doc* doc = yyjson_read(json.c_str(), json.size(), 0);
+        if (doc == nullptr)
+        {
+            error = L"json parse failed";
+            return false;
+        }
+        yyjson_val* root = yyjson_doc_get_root(doc);
+        if (root == nullptr || !yyjson_is_obj(root))
+        {
+            yyjson_doc_free(doc);
+            error = L"json root not object";
+            return false;
+        }
+
+        // {"Response":"Error","Message":"..."}
+        std::string resp = utilities::JsonHelper::GetJsonString(root, "Response");
+        if (!resp.empty() && _stricmp(resp.c_str(), "Error") == 0)
+        {
+            std::string msg = utilities::JsonHelper::GetJsonString(root, "Message");
+            yyjson_doc_free(doc);
+            error = utilities::StringHelper::StrToUnicode(msg.c_str(), true);
+            if (error.empty())
+                error = L"CryptoCompare error";
+            return false;
+        }
+
+        yyjson_val* raw = yyjson_obj_get(root, "RAW");
+        if (raw == nullptr || !yyjson_is_obj(raw))
+        {
+            yyjson_doc_free(doc);
+            error = L"RAW missing";
+            return false;
+        }
+
+        auto get_num = [](yyjson_val* obj, const char* key) -> double
+            {
+                if (obj == nullptr)
+                    return 0.0;
+                yyjson_val* v = yyjson_obj_get(obj, key);
+                if (v == nullptr)
+                    return 0.0;
+                if (yyjson_is_real(v))
+                    return yyjson_get_real(v);
+                if (yyjson_is_int(v))
+                    return (double)yyjson_get_sint(v);
+                return 0.0;
+            };
+
+        // RAW.<FSYM>.<TSYM>
+        yyjson_val* fval{};
+        yyjson_obj_iter iter = yyjson_obj_iter_with(raw);
+        while ((fval = yyjson_obj_iter_next(&iter)) != nullptr)
+        {
+            const char* fsym = yyjson_obj_iter_get_key(&iter);
+            if (fsym == nullptr)
+                continue;
+
+            yyjson_val* fobj = fval;
+            if (fobj == nullptr || !yyjson_is_obj(fobj))
+                continue;
+
+            // 只取指定 quote_currency
+            std::string tsym = utilities::StringHelper::UnicodeToStr(quote_currency_upper.c_str(), true);
+            yyjson_val* to = yyjson_obj_get(fobj, tsym.c_str());
+            if (to == nullptr || !yyjson_is_obj(to))
+                continue;
+
+            Quote q{};
+            q.symbol = utilities::StringHelper::StrToUnicode(fsym, true);
+            q.last = get_num(to, "PRICE");
+            q.change = get_num(to, "CHANGE24HOUR");
+            q.change_pct = get_num(to, "CHANGEPCT24HOUR");
+            q.high_24h = get_num(to, "HIGH24HOUR");
+            q.low_24h = get_num(to, "LOW24HOUR");
+            q.volume_24h = get_num(to, "VOLUME24HOUR");
+            q.bid = 0.0;
+            q.ask = 0.0;
+            q.is_ok = (q.last > 0.0);
+
+            yyjson_val* last_update = yyjson_obj_get(to, "LASTUPDATE");
+            if (last_update != nullptr && yyjson_is_int(last_update))
+                q.update_time = (time_t)yyjson_get_sint(last_update);
+            else
+                q.update_time = time(nullptr);
+
+            out[q.symbol] = q;
+        }
+
+        yyjson_doc_free(doc);
+        if (out.empty())
+        {
+            error = L"empty quotes";
+            return false;
+        }
+        return true;
+    }
+
     std::wstring UrlEncodeSymbolsParam(const std::vector<std::wstring>& symbols)
     {
         // 构造 Binance symbols 参数：["BTCUSDT","ETHUSDT"] 并做最小 URL 编码
@@ -351,6 +464,13 @@ namespace
             }
         }
         return encoded;
+    }
+
+    std::wstring TrimRightSlash(std::wstring s)
+    {
+        while (!s.empty() && (s.back() == L'/' || s.back() == L'\\'))
+            s.pop_back();
+        return s;
     }
 }
 
@@ -429,8 +549,13 @@ void CDataManager::LoadConfig(const std::wstring& config_dir)
             RebuildRenderCacheLocked();
             return;
         }
+        m_setting_data.provider = ParseProviderLocked(ini2.GetString(L"config", L"provider", L"binance"));
         ini2.GetStringList(L"config", L"symbols", m_setting_data.symbols, std::vector<std::wstring>{});
         m_setting_data.active_symbol = ini2.GetString(L"config", L"active_symbol", L"");
+        m_setting_data.quote_currency = ini2.GetString(L"config", L"quote_currency", L"USDT");
+        m_setting_data.binance_base_url = TrimRightSlash(ini2.GetString(L"config", L"binance_base_url", L"https://api.binance.com"));
+        m_setting_data.cryptocompare_base_url = TrimRightSlash(ini2.GetString(L"config", L"cryptocompare_base_url", L"https://min-api.cryptocompare.com"));
+        m_setting_data.cryptocompare_api_key = ini2.GetString(L"config", L"cryptocompare_api_key", L"");
         m_setting_data.update_interval_sec = ini2.GetInt(L"config", L"update_interval_sec", 5);
         m_setting_data.tooltip_max_coins = ini2.GetInt(L"config", L"tooltip_max_coins", 8);
         m_setting_data.tooltip_sort = ParseTooltipSortLocked(ini2.GetString(L"config", L"tooltip_sort", L"watchlist"));
@@ -457,8 +582,13 @@ void CDataManager::LoadConfig(const std::wstring& config_dir)
     }
     else
     {
+    m_setting_data.provider = ParseProviderLocked(ini.GetString(L"config", L"provider", L"binance"));
     ini.GetStringList(L"config", L"symbols", m_setting_data.symbols, std::vector<std::wstring>{});
     m_setting_data.active_symbol = ini.GetString(L"config", L"active_symbol", L"");
+    m_setting_data.quote_currency = ini.GetString(L"config", L"quote_currency", L"USDT");
+    m_setting_data.binance_base_url = TrimRightSlash(ini.GetString(L"config", L"binance_base_url", L"https://api.binance.com"));
+    m_setting_data.cryptocompare_base_url = TrimRightSlash(ini.GetString(L"config", L"cryptocompare_base_url", L"https://min-api.cryptocompare.com"));
+    m_setting_data.cryptocompare_api_key = ini.GetString(L"config", L"cryptocompare_api_key", L"");
     m_setting_data.update_interval_sec = ini.GetInt(L"config", L"update_interval_sec", 5);
     m_setting_data.tooltip_max_coins = ini.GetInt(L"config", L"tooltip_max_coins", 8);
     m_setting_data.tooltip_sort = ParseTooltipSortLocked(ini.GetString(L"config", L"tooltip_sort", L"watchlist"));
@@ -515,8 +645,13 @@ void CDataManager::SaveConfig() const
     utilities::CIniHelper ini(m_config_path);
     {
         std::lock_guard<std::mutex> lock(m_mutex);
+        ini.WriteString(L"config", L"provider", ProviderToStringLocked(m_setting_data.provider));
         ini.WriteStringList(L"config", L"symbols", m_setting_data.symbols);
         ini.WriteString(L"config", L"active_symbol", m_setting_data.active_symbol);
+        ini.WriteString(L"config", L"quote_currency", m_setting_data.quote_currency);
+        ini.WriteString(L"config", L"binance_base_url", m_setting_data.binance_base_url);
+        ini.WriteString(L"config", L"cryptocompare_base_url", m_setting_data.cryptocompare_base_url);
+        ini.WriteString(L"config", L"cryptocompare_api_key", m_setting_data.cryptocompare_api_key);
         ini.WriteInt(L"config", L"update_interval_sec", m_setting_data.update_interval_sec);
         ini.WriteInt(L"config", L"tooltip_max_coins", m_setting_data.tooltip_max_coins);
         ini.WriteString(L"config", L"tooltip_sort", TooltipSortToStringLocked(m_setting_data.tooltip_sort));
@@ -597,6 +732,15 @@ void CDataManager::EnsureDefaultsLocked()
     if (m_setting_data.symbols.empty())
         m_setting_data.symbols = { L"BTCUSDT", L"ETHUSDT", L"SOLUSDT" };
 
+    m_setting_data.quote_currency = NormalizeQuoteCurrencyLocked(m_setting_data.quote_currency);
+    if (m_setting_data.quote_currency.empty())
+        m_setting_data.quote_currency = L"USDT";
+
+    if (m_setting_data.binance_base_url.empty())
+        m_setting_data.binance_base_url = L"https://api.binance.com";
+    if (m_setting_data.cryptocompare_base_url.empty())
+        m_setting_data.cryptocompare_base_url = L"https://min-api.cryptocompare.com";
+
     if (m_setting_data.update_interval_sec < 1)
         m_setting_data.update_interval_sec = 1;
     if (m_setting_data.tooltip_max_coins < 1)
@@ -641,6 +785,83 @@ std::wstring CDataManager::ToUpperLocked(const std::wstring& s) const
             ch = (wchar_t)(ch - L'a' + L'A');
     }
     return out;
+}
+
+SettingData::Provider CDataManager::ParseProviderLocked(const std::wstring& s) const
+{
+    std::wstring v = ToUpperLocked(s);
+    if (v == L"CRYPTOCOMPARE" || v == L"CC")
+        return SettingData::Provider::CryptoCompare;
+    return SettingData::Provider::Binance;
+}
+
+const wchar_t* CDataManager::ProviderToStringLocked(SettingData::Provider v) const
+{
+    switch (v)
+    {
+    case SettingData::Provider::CryptoCompare: return L"cryptocompare";
+    case SettingData::Provider::Binance:
+    default:
+        return L"binance";
+    }
+}
+
+std::wstring CDataManager::NormalizeQuoteCurrencyLocked(const std::wstring& s) const
+{
+    std::wstring out = NormalizeSymbolFromIniLocked(s);
+    out = ToUpperLocked(out);
+    return out;
+}
+
+std::wstring CDataManager::NormalizeBaseSymbolLocked(const std::wstring& s) const
+{
+    // 目标：将 "BTCUSDT" / "BTC/USD" / "BTC" 归一为 base="BTC"
+    std::wstring x = NormalizeSymbolFromIniLocked(s);
+    x = ToUpperLocked(x);
+    if (x.empty())
+        return x;
+
+    // 先按 '/' 分割
+    size_t slash = x.find(L'/');
+    if (slash != std::wstring::npos)
+        x = x.substr(0, slash);
+
+    // 去掉常见计价后缀（用于兼容从 Binance 迁移到 CC）
+    const wchar_t* suffixes[] = { L"USDT", L"USDC", L"USD", L"EUR", L"CNY", L"JPY", L"GBP" };
+    for (auto suf : suffixes)
+    {
+        size_t n = wcslen(suf);
+        if (x.size() > n && x.compare(x.size() - n, n, suf) == 0)
+        {
+            x = x.substr(0, x.size() - n);
+            break;
+        }
+    }
+
+    // 仅保留字母数字
+    std::wstring out;
+    out.reserve(x.size());
+    for (wchar_t ch : x)
+    {
+        if ((ch >= L'A' && ch <= L'Z') || (ch >= L'0' && ch <= L'9'))
+            out.push_back(ch);
+    }
+    return out;
+}
+
+std::wstring CDataManager::FormatSymbolForDisplayLocked(const std::wstring& s) const
+{
+    if (m_setting_data.provider == SettingData::Provider::CryptoCompare)
+    {
+        std::wstring base = NormalizeBaseSymbolLocked(s);
+        if (base.empty())
+            base = NormalizeSymbolFromIniLocked(s);
+        std::wstring cc = NormalizeQuoteCurrencyLocked(m_setting_data.quote_currency);
+        if (cc.empty())
+            cc = L"USD";
+        return base + L"/" + cc;
+    }
+    return NormalizeSymbolFromIniLocked(s);
 }
 
 std::wstring CDataManager::NormalizeSymbolFromIniLocked(const std::wstring& s) const
@@ -750,9 +971,10 @@ std::wstring CDataManager::FormatSignedPct(double pct) const
 std::wstring CDataManager::FormatCoreLineLocked(const Quote& quote) const
 {
     std::wstring symbol = quote.symbol.empty() ? m_setting_data.active_symbol : quote.symbol;
+    const std::wstring display_symbol = FormatSymbolForDisplayLocked(symbol);
     if (!quote.is_ok)
     {
-        std::wstring line = symbol;
+        std::wstring line = display_symbol;
         line += L" --";
         if (!quote.error.empty())
         {
@@ -766,7 +988,7 @@ std::wstring CDataManager::FormatCoreLineLocked(const Quote& quote) const
         return line;
     }
 
-    std::wstring line = symbol;
+    std::wstring line = display_symbol;
     line += L' ';
     line += FormatPrice(quote.last);
     line += L' ';
@@ -1098,7 +1320,7 @@ std::wstring CDataManager::BuildTooltipLocked() const
         else
             wss << L"  ";
 
-        wss << s
+        wss << FormatSymbolForDisplayLocked(s)
             << L" | " << FormatPrice(q.last)
             << L" | " << FormatSignedPct(q.change_pct);
 
@@ -1132,7 +1354,7 @@ std::wstring CDataManager::BuildTooltipLocked() const
         wss << L"\n";
 
         // 1) 聚焦摘要行
-        wss << L"FOCUS " << focus << L" " << FormatPrice(q.last) << L" (" << FormatSignedPct(q.change_pct) << L")";
+        wss << L"FOCUS " << FormatSymbolForDisplayLocked(focus) << L" " << FormatPrice(q.last) << L" (" << FormatSignedPct(q.change_pct) << L")";
         if (!q.is_ok)
             wss << L" x";
         else if (stale)
@@ -1194,7 +1416,8 @@ std::wstring CDataManager::BuildTooltipLocked() const
         wss << L" | Backoff " << m_backoff_sec << L"s";
 
     wss
-        << L" | Src Binance(REST)"
+        << L" | Src " << ProviderToStringLocked(m_setting_data.provider)
+        << L" | CCY " << NormalizeQuoteCurrencyLocked(m_setting_data.quote_currency)
         << L" | Watch " << m_setting_data.symbols.size()
         << L" | OK " << ok_count;
     if (stale_count > 0)
@@ -1293,18 +1516,72 @@ int CDataManager::GetEffectiveIntervalSec() const
 bool CDataManager::RequestRealtimeQuotes()
 {
     std::vector<std::wstring> symbols;
+    SettingData::Provider provider{};
+    std::wstring quote_currency;
+    std::wstring binance_base_url;
+    std::wstring cryptocompare_base_url;
+    std::wstring cryptocompare_api_key;
     bool dump_last_response{};
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         EnsureDefaultsLocked();
         symbols = m_setting_data.symbols;
+        provider = m_setting_data.provider;
+        quote_currency = m_setting_data.quote_currency;
+        binance_base_url = m_setting_data.binance_base_url;
+        cryptocompare_base_url = m_setting_data.cryptocompare_base_url;
+        cryptocompare_api_key = m_setting_data.cryptocompare_api_key;
         dump_last_response = m_setting_data.debug_dump_last_response;
     }
     if (symbols.empty())
         return false;
 
-    std::wstring url = L"https://api.binance.com/api/v3/ticker/24hr?symbols=";
-    url += UrlEncodeSymbolsParam(symbols);
+    std::wstring url;
+    if (provider == SettingData::Provider::CryptoCompare)
+    {
+        // CryptoCompare: symbols 为 base codes；如果用户从 Binance 迁移，允许 "BTCUSDT" 这种写法并自动剥离后缀
+        std::vector<std::wstring> bases;
+        bases.reserve(symbols.size());
+        for (const auto& s : symbols)
+        {
+            std::wstring base = NormalizeBaseSymbolLocked(s);
+            if (!base.empty())
+                bases.push_back(base);
+        }
+        std::sort(bases.begin(), bases.end(), [](const std::wstring& a, const std::wstring& b) { return _wcsicmp(a.c_str(), b.c_str()) < 0; });
+        bases.erase(std::unique(bases.begin(), bases.end(), [](const std::wstring& a, const std::wstring& b) { return _wcsicmp(a.c_str(), b.c_str()) == 0; }), bases.end());
+        if (bases.empty())
+            return false;
+
+        std::wstring cc = NormalizeQuoteCurrencyLocked(quote_currency);
+        if (cc.empty())
+            cc = L"USD";
+
+        std::wstring fsyms;
+        for (size_t i = 0; i < bases.size(); ++i)
+        {
+            if (i > 0)
+                fsyms += L",";
+            fsyms += bases[i];
+        }
+
+        url = TrimRightSlash(cryptocompare_base_url);
+        url += L"/data/pricemultifull?fsyms=";
+        url += fsyms;
+        url += L"&tsyms=";
+        url += cc;
+        if (!cryptocompare_api_key.empty())
+        {
+            url += L"&api_key=";
+            url += cryptocompare_api_key;
+        }
+    }
+    else
+    {
+        url = TrimRightSlash(binance_base_url);
+        url += L"/api/v3/ticker/24hr?symbols=";
+        url += UrlEncodeSymbolsParam(symbols);
+    }
 
     std::string body;
     std::wstring http_err;
@@ -1337,9 +1614,22 @@ bool CDataManager::RequestRealtimeQuotes()
         }
     }
 
-    if (!ParseBinance24hr(body, parsed, parse_err))
+    bool parsed_ok{};
+    if (provider == SettingData::Provider::CryptoCompare)
     {
-        DebugLog(1, L"ParseBinance24hr failed: %s", parse_err.c_str());
+        std::wstring cc = NormalizeQuoteCurrencyLocked(quote_currency);
+        if (cc.empty())
+            cc = L"USD";
+        parsed_ok = ParseCryptoCompareMultiFull(body, cc, parsed, parse_err);
+    }
+    else
+    {
+        parsed_ok = ParseBinance24hr(body, parsed, parse_err);
+    }
+
+    if (!parsed_ok)
+    {
+        DebugLog(1, L"ParseQuotes failed: %s", parse_err.c_str());
         std::lock_guard<std::mutex> lock(m_mutex);
         m_backoff_sec = (std::min)(60, (m_backoff_sec == 0 ? 10 : m_backoff_sec * 2));
         Quote err{};
@@ -1360,19 +1650,38 @@ bool CDataManager::RequestRealtimeQuotes()
         // 更新/合并：不在返回里的 symbol 标记为失败
         for (const auto& s : symbols)
         {
-            auto it = parsed.find(s);
-            if (it != parsed.end())
+            Quote q{};
+            if (provider == SettingData::Provider::CryptoCompare)
             {
-                m_quotes[s] = it->second;
+                std::wstring base = NormalizeBaseSymbolLocked(s);
+                auto it = parsed.find(base);
+                if (it != parsed.end())
+                    q = it->second;
+                q.symbol = s; // key 仍使用配置里的 symbol，显示时再格式化为 base/CCY
             }
             else
             {
-                Quote q{};
+                auto it = parsed.find(s);
+                if (it != parsed.end())
+                    q = it->second;
+            }
+
+            if (q.symbol.empty())
                 q.symbol = s;
-                q.is_ok = false;
-                q.error = L"no data";
-                q.update_time = time(nullptr);
+
+            if (q.last > 0.0)
+            {
+                q.is_ok = true;
                 m_quotes[s] = q;
+            }
+            else
+            {
+                Quote fail{};
+                fail.symbol = s;
+                fail.is_ok = false;
+                fail.error = L"no data";
+                fail.update_time = time(nullptr);
+                m_quotes[s] = fail;
             }
         }
         RebuildRenderCacheLocked();

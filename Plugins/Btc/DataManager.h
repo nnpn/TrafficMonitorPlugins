@@ -46,6 +46,12 @@ struct Candle
 
 struct SettingData
 {
+    enum class Provider
+    {
+        Binance,
+        CryptoCompare,
+    };
+
     enum class Line2Mode
     {
         DualSymbol,
@@ -73,6 +79,19 @@ struct SettingData
 
     // 当前任务栏聚焦币种（优先匹配 symbols 中的元素）
     std::wstring active_symbol;
+
+    // 数据源（可扩展）：binance / cryptocompare
+    Provider provider{ Provider::Binance };
+
+    // 显示/换算的法币/计价单位（CryptoCompare: tsyms；Binance: 仅用于显示提示）
+    std::wstring quote_currency{ L"USDT" };
+
+    // CryptoCompare：可选 API Key（https://min-api.cryptocompare.com）
+    std::wstring cryptocompare_api_key;
+
+    // API Base URL（便于自定义/调试；不含末尾 '/'）
+    std::wstring binance_base_url{ L"https://api.binance.com" };
+    std::wstring cryptocompare_base_url{ L"https://min-api.cryptocompare.com" };
 
     // 报价刷新间隔（秒）
     int update_interval_sec{ 5 };
@@ -257,6 +276,11 @@ private:
     std::wstring GetTooltipFocusSymbolLocked() const;
     std::wstring ToUpperLocked(const std::wstring& s) const;
     std::wstring NormalizeSymbolFromIniLocked(const std::wstring& s) const;
+    SettingData::Provider ParseProviderLocked(const std::wstring& s) const;
+    const wchar_t* ProviderToStringLocked(SettingData::Provider v) const;
+    std::wstring NormalizeQuoteCurrencyLocked(const std::wstring& s) const;
+    std::wstring NormalizeBaseSymbolLocked(const std::wstring& s) const;
+    std::wstring FormatSymbolForDisplayLocked(const std::wstring& s) const;
     SettingData::TooltipSort ParseTooltipSortLocked(const std::wstring& s) const;
     SettingData::TooltipFocusMode ParseTooltipFocusModeLocked(const std::wstring& s) const;
     const wchar_t* TooltipSortToStringLocked(SettingData::TooltipSort v) const;
