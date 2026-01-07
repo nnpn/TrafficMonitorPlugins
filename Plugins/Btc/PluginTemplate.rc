@@ -142,6 +142,8 @@ BEGIN
     IDS_PLUGIN_DESCRIPTION  "加密货币价格监控插件"
     IDS_PLUGIN_ITEM_NAME    "加密货币"
     IDS_COMMAND_UPDATE      "更新报价(&U)"
+    IDS_PLUGIN_ITEM_NAME_LINE1 "加密货币·主行"
+    IDS_PLUGIN_ITEM_NAME_LINE2 "加密货币·副行"
 END
 
 #endif    // 中文(简体，中国) resources
@@ -211,6 +213,8 @@ BEGIN
     IDS_PLUGIN_DESCRIPTION  "Crypto price monitor plugin"
     IDS_PLUGIN_ITEM_NAME    "Crypto"
     IDS_COMMAND_UPDATE      "&Update Quotes"
+    IDS_PLUGIN_ITEM_NAME_LINE1 "Crypto (Primary)"
+    IDS_PLUGIN_ITEM_NAME_LINE2 "Crypto (Secondary)"
 END
 
 #endif    // 英语(美国) resources

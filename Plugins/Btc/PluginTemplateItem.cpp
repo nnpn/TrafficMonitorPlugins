@@ -12,11 +12,10 @@ void CPluginTemplateItem::SetLineIndex(int line_index)
 
 const wchar_t* CPluginTemplateItem::GetItemName() const
 {
-    m_name_cache = g_data.StringRes(IDS_PLUGIN_ITEM_NAME).GetString();
     if (m_line_index == 0)
-        m_name_cache += L" (1)";
+        m_name_cache = g_data.StringRes(IDS_PLUGIN_ITEM_NAME_LINE1).GetString();
     else
-        m_name_cache += L" (2)";
+        m_name_cache = g_data.StringRes(IDS_PLUGIN_ITEM_NAME_LINE2).GetString();
     return m_name_cache.c_str();
 }
 
@@ -52,13 +51,13 @@ int CPluginTemplateItem::GetItemWidthEx(void * hDC) const
 {
     CDC* pDC = CDC::FromHandle((HDC)hDC);
     auto lines = g_data.GetTaskbarLines();
-    std::wstring sample = g_data.GetSampleText();
-    int w1 = pDC->GetTextExtent(lines.first.c_str()).cx;
-    int w2 = pDC->GetTextExtent(lines.second.c_str()).cx;
-    int ws = pDC->GetTextExtent(sample.c_str()).cx;
-
-    int space_w = pDC->GetTextExtent(L" ").cx;
-    return std::max(ws, std::max(w1, w2)) + space_w;
+    std::wstring t1 = L" ";
+    t1 += lines.first;
+    std::wstring t2 = L" ";
+    t2 += lines.second;
+    int w1 = pDC->GetTextExtent(t1.c_str()).cx;
+    int w2 = pDC->GetTextExtent(t2.c_str()).cx;
+    return std::max(w1, w2);
 }
 
 void CPluginTemplateItem::DrawItem(void* hDC, int x, int y, int w, int h, bool dark_mode)
@@ -79,14 +78,10 @@ void CPluginTemplateItem::DrawItem(void* hDC, int x, int y, int w, int h, bool d
     if (right_align)
         flags |= DT_RIGHT;
 
-    // 视觉间距：与前一列保持约一个空格宽度（右对齐模式下不强制）
-    if (!right_align)
-    {
-        int space_w = pDC->GetTextExtent(L" ").cx;
-        rect.left += space_w;
-    }
-
-    pDC->DrawText(text.c_str(), rect, flags | DT_VCENTER);
+    // 视觉间距：统一使用一个前导空格，避免过近，同时不引入额外尾部留白
+    std::wstring draw = L" ";
+    draw += text;
+    pDC->DrawText(draw.c_str(), rect, flags | DT_VCENTER);
 }
 
 int CPluginTemplateItem::OnMouseEvent(MouseEventType type, int x, int y, void* hWnd, int flag)
