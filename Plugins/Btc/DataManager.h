@@ -153,6 +153,11 @@ public:
     void ToggleLine2Mode();
 
     /**
+     * @brief 调试：边框开关（可持久化）
+     */
+    void ToggleDebugBounds();
+
+    /**
      * @brief 当前第二行是否为 roll_detail 模式
      */
     bool IsLine2RollDetailMode() const;

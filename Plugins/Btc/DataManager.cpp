@@ -1492,6 +1492,14 @@ void CDataManager::ToggleLine2Mode()
     RebuildRenderCacheLocked();
 }
 
+void CDataManager::ToggleDebugBounds()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    EnsureDefaultsLocked();
+    m_setting_data.debug_show_bounds = !m_setting_data.debug_show_bounds;
+    RebuildRenderCacheLocked();
+}
+
 bool CDataManager::IsLine2RollDetailMode() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
