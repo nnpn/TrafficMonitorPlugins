@@ -32,6 +32,7 @@
     <ProjectGuid>{4E947624-A9BE-4F56-8EF1-C2F2878493A5}</ProjectGuid>
     <RootNamespace>Btc</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>Btc</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">

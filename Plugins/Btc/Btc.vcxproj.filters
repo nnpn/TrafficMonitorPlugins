@@ -13,7 +13,7 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
-    <Filter Include="PluginTemplate">
+    <Filter Include="Btc">
       <UniqueIdentifier>{b1276a30-5a2e-4c44-a72b-a85f342a1e8e}</UniqueIdentifier>
     </Filter>
     <Filter Include="PluginTemplateItem">
@@ -34,7 +34,7 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="PluginTemplate.h">
-      <Filter>PluginTemplate</Filter>
+      <Filter>Btc</Filter>
     </ClInclude>
     <ClInclude Include="PluginTemplateItem.h">
       <Filter>PluginTemplateItem</Filter>
@@ -54,7 +54,7 @@
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="PluginTemplate.cpp">
-      <Filter>PluginTemplate</Filter>
+      <Filter>Btc</Filter>
     </ClCompile>
     <ClCompile Include="PluginTemplateItem.cpp">
       <Filter>PluginTemplateItem</Filter>
