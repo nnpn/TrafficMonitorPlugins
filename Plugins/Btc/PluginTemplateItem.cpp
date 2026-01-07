@@ -65,34 +65,69 @@ void CPluginTemplateItem::DrawItem(void* hDC, int x, int y, int w, int h, bool d
     CDC* pDC = CDC::FromHandle((HDC)hDC);
     CRect rect(CPoint(x, y), CSize(w, h));
 
-    const auto lines = g_data.GetTaskbarLines();
-    const bool right_align = g_data.IsRightAlign();
-    const std::wstring& text = (m_line_index == 0 ? lines.first : lines.second);
+    const auto snap = g_data.GetTaskbarLinesEx();
+    const std::wstring& text = (m_line_index == 0 ? snap.line1 : snap.line2);
+    const int trend = (m_line_index == 0 ? snap.trend1 : snap.trend2);
 
-    // 基础文本颜色（Phase 3 再按涨跌着色）
-    COLORREF text_color = dark_mode ? RGB(255, 255, 255) : RGB(0, 0, 0);
+    COLORREF color_default;
+    COLORREF color_red;
+    COLORREF color_green;
+    if (dark_mode)
+    {
+        color_default = RGB(255, 255, 255);
+        color_red = RGB(255, 121, 120);
+        color_green = RGB(111, 215, 149);
+    }
+    else
+    {
+        color_default = RGB(0, 0, 0);
+        color_red = RGB(195, 0, 0);
+        color_green = RGB(46, 139, 87);
+    }
+
+    COLORREF text_color = color_default;
+    if (snap.color_with_change && trend != 0)
+    {
+        const bool up = (trend > 0);
+        const bool up_is_red = snap.up_is_red;
+        const bool use_red = (up ? up_is_red : !up_is_red);
+        text_color = use_red ? color_red : color_green;
+    }
     pDC->SetBkMode(TRANSPARENT);
     pDC->SetTextColor(text_color);
 
     UINT flags = DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS;
-    if (right_align)
+    if (snap.right_align)
         flags |= DT_RIGHT;
 
     // 视觉间距：统一使用一个前导空格，避免过近，同时不引入额外尾部留白
     std::wstring draw = L" ";
     draw += text;
     pDC->DrawText(draw.c_str(), rect, flags | DT_VCENTER);
+
+    if (snap.debug_show_bounds)
+    {
+        COLORREF border = dark_mode ? RGB(80, 160, 255) : RGB(0, 120, 215);
+        pDC->Draw3dRect(rect, border, border);
+    }
 }
 
 int CPluginTemplateItem::OnMouseEvent(MouseEventType type, int x, int y, void* hWnd, int flag)
 {
+    const bool line2_roll_detail = (m_line_index == 1) && g_data.IsLine2RollDetailMode();
     switch (type)
     {
     case IPluginItem::MT_WHEEL_UP:
-        g_data.StepActiveSymbol(-1);
+        if (line2_roll_detail)
+            g_data.StepLine2Detail(-1);
+        else
+            g_data.StepActiveSymbol(-1);
         return 1;
     case IPluginItem::MT_WHEEL_DOWN:
-        g_data.StepActiveSymbol(1);
+        if (line2_roll_detail)
+            g_data.StepLine2Detail(1);
+        else
+            g_data.StepActiveSymbol(1);
         return 1;
     default:
         break;

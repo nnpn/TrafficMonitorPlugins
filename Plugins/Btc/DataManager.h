@@ -24,6 +24,8 @@ struct Quote
     double high_24h{};
     double low_24h{};
     double volume_24h{};
+    double bid{};
+    double ask{};
     time_t update_time{};           // 数据时间（UTC/本地均可，Phase 2 决定）
     bool is_ok{};                   // 本次快照是否有效
     std::wstring error;             // 失败原因摘要（仅 is_ok=false 时有效）
@@ -44,6 +46,12 @@ struct Candle
 
 struct SettingData
 {
+    enum class Line2Mode
+    {
+        DualSymbol,
+        RollDetail,
+    };
+
     // 监控列表（1~N）
     std::vector<std::wstring> symbols;
 
@@ -59,13 +67,21 @@ struct SettingData
     // 过期阈值（秒）：超过该时间未更新则标记为 stale
     int stale_threshold_sec{ 30 };
 
-    // 第二行显示模式：true=双币同屏（显示下一个币种核心行），false=当前币种滚动明细（Phase 3）
-    bool second_line_dual_symbol{ true };
+    // 第二行显示模式（Phase 3）：默认双币同屏
+    Line2Mode line2_mode{ Line2Mode::DualSymbol };
+    // 第二行滚动明细项列表（Phase 3），当 line2_mode=RollDetail 时生效
+    std::vector<std::wstring> line2_roll_items;
+
+    // 任务栏着色：按涨跌为整行文本着色（Phase 3）
+    bool color_with_change{ false };
+    // 涨为红：true=涨红跌绿；false=涨绿跌红
+    bool up_is_red{ true };
 
     // Debug 开关
     bool debug_log_enabled{ false };
     int debug_log_level{ 1 };
     bool debug_dump_last_response{ false };    // 保存最近一次 HTTP 响应到文件（仅用于调试）
+    bool debug_show_bounds{ false };           // DrawItem 边框辅助调试
 };
 
 class CDataManager
@@ -102,9 +118,36 @@ public:
     void StepActiveSymbol(int delta);
 
     /**
+     * @brief 第二行（roll_detail）明细滚动项切换
+     */
+    void StepLine2Detail(int delta);
+
+    /**
+     * @brief 当前第二行是否为 roll_detail 模式
+     */
+    bool IsLine2RollDetailMode() const;
+
+    /**
      * @brief 获取当前可绘制的两行文本（线程安全快照）
      */
     std::pair<std::wstring, std::wstring> GetTaskbarLines() const;
+
+    struct TaskbarLinesEx
+    {
+        std::wstring line1;
+        std::wstring line2;
+        int trend1{};    // +1/-1/0
+        int trend2{};
+        bool color_with_change{};
+        bool up_is_red{ true };
+        bool debug_show_bounds{};
+        bool right_align{};
+    };
+
+    /**
+     * @brief 获取两行文本+样式快照（避免 DrawItem 多次加锁）
+     */
+    TaskbarLinesEx GetTaskbarLinesEx() const;
 
     /**
      * @brief 获取 Tooltip 文本（线程安全快照）
@@ -150,6 +193,14 @@ public:
     SettingData m_setting_data;
 
 private:
+    enum class Line2DetailItem
+    {
+        HighLow,
+        Volume,
+        BidAsk,
+        UpdateTime,
+    };
+
     static CDataManager m_instance;
     std::wstring m_config_path;
     std::wstring m_log_path;
@@ -165,13 +216,25 @@ private:
         std::wstring line2;
         std::wstring tooltip;
         std::wstring sample;
+        int trend1{};
+        int trend2{};
+        bool color_with_change{};
+        bool up_is_red{ true };
+        bool debug_show_bounds{};
     };
 
     void EnsureDefaultsLocked();
     void RebuildRenderCacheLocked();
     std::wstring FormatCoreLineLocked(const Quote& quote) const;
+    std::wstring FormatDetailLineLocked(const Quote& quote) const;
     std::wstring FormatPrice(double price) const;
     std::wstring FormatSignedPct(double pct) const;
+    std::wstring FormatCompactNumber(double value) const;
+    std::wstring FormatClockTime(time_t t) const;
+    int TrendFromQuoteLocked(const Quote& quote) const;
+    Quote GetQuoteLocked(const std::wstring& symbol) const;
+    std::vector<Line2DetailItem> GetLine2DetailItemsLocked() const;
+    bool TryParseDetailItem(const std::wstring& token, Line2DetailItem& out) const;
 
     mutable std::mutex m_mutex;
     std::map<std::wstring, Quote> m_quotes;
@@ -181,4 +244,7 @@ private:
     // 请求与失败退避（Phase 2）
     time_t m_last_success_time{};
     int m_backoff_sec{};
+
+    // Phase 3：roll_detail 运行态索引（不持久化）
+    int m_line2_detail_index{};
 };
