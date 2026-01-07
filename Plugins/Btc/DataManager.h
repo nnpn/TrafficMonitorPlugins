@@ -52,6 +52,22 @@ struct SettingData
         RollDetail,
     };
 
+    enum class TooltipSort
+    {
+        Watchlist,
+        SymbolAsc,
+        ChangePctDesc,
+        ChangePctAsc,
+    };
+
+    enum class TooltipFocusMode
+    {
+        FollowActive,
+        Pinned,
+        TopMover,
+        None,
+    };
+
     // 监控列表（1~N）
     std::vector<std::wstring> symbols;
 
@@ -63,6 +79,15 @@ struct SettingData
 
     // Tooltip 最大展示币种数量
     int tooltip_max_coins{ 8 };
+
+    // Tooltip 排序（Phase 4）
+    TooltipSort tooltip_sort{ TooltipSort::Watchlist };
+
+    // Tooltip 聚焦区（Phase 4）
+    bool tooltip_show_focus{ true };
+    TooltipFocusMode tooltip_focus_mode{ TooltipFocusMode::FollowActive };
+    std::wstring tooltip_pinned_symbol;
+    int tooltip_focus_lines{ 3 };       // 2~4 行，超范围会被收敛
 
     // 过期阈值（秒）：超过该时间未更新则标记为 stale
     int stale_threshold_sec{ 30 };
@@ -235,6 +260,17 @@ private:
     Quote GetQuoteLocked(const std::wstring& symbol) const;
     std::vector<Line2DetailItem> GetLine2DetailItemsLocked() const;
     bool TryParseDetailItem(const std::wstring& token, Line2DetailItem& out) const;
+
+    // Phase 4：Tooltip 构建
+    std::wstring BuildTooltipLocked() const;
+    std::vector<std::wstring> BuildTooltipOverviewOrderLocked() const;
+    std::wstring GetTooltipFocusSymbolLocked() const;
+    std::wstring ToUpperLocked(const std::wstring& s) const;
+    std::wstring NormalizeSymbolFromIniLocked(const std::wstring& s) const;
+    SettingData::TooltipSort ParseTooltipSortLocked(const std::wstring& s) const;
+    SettingData::TooltipFocusMode ParseTooltipFocusModeLocked(const std::wstring& s) const;
+    const wchar_t* TooltipSortToStringLocked(SettingData::TooltipSort v) const;
+    const wchar_t* TooltipFocusModeToStringLocked(SettingData::TooltipFocusMode v) const;
 
     mutable std::mutex m_mutex;
     std::map<std::wstring, Quote> m_quotes;

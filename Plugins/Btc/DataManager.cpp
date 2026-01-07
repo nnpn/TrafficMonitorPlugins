@@ -51,6 +51,11 @@ namespace
             << L"; active_symbol: 任务栏聚焦币种（必须是 symbols 里的一个）\n"
             << L"; update_interval_sec: 报价刷新间隔（秒）\n"
             << L"; tooltip_max_coins: Tooltip 概览最多展示币种数量\n"
+            << L"; tooltip_sort: Tooltip 概览排序：watchlist / symbol_asc / change_pct_desc / change_pct_asc\n"
+            << L"; tooltip_show_focus: 是否显示聚焦区（true/false）\n"
+            << L"; tooltip_focus_mode: 聚焦对象：follow_active / pinned / top_mover / none\n"
+            << L"; tooltip_pinned_symbol: 当 tooltip_focus_mode=pinned 时生效\n"
+            << L"; tooltip_focus_lines: 聚焦区行数（2~4）\n"
             << L"; stale_threshold_sec: 超过该秒数未更新则标记为过期(*)\n"
             << L"; line2_mode: 第二行显示模式：dual_symbol / roll_detail\n"
             << L"; line2_roll_items: 当 line2_mode=roll_detail 时第二行可滚动显示的明细项\n"
@@ -62,6 +67,12 @@ namespace
             << L"active_symbol = \"BTCUSDT\"\n"
             << L"update_interval_sec = 5\n"
             << L"tooltip_max_coins = 8\n"
+            << L"tooltip_sort = watchlist\n"
+            << L"tooltip_show_focus = true\n"
+            << L"tooltip_focus_mode = follow_active\n"
+            << L"; pinned symbol example:\n"
+            << L"; tooltip_pinned_symbol = \"BTCUSDT\"\n"
+            << L"tooltip_focus_lines = 3\n"
             << L"stale_threshold_sec = 30\n"
             << L"; 兼容旧字段：second_line_dual_symbol=true 等价于 line2_mode=dual_symbol\n"
             << L"second_line_dual_symbol = true\n"
@@ -302,6 +313,11 @@ void CDataManager::LoadConfig(const std::wstring& config_dir)
         m_setting_data.active_symbol = ini2.GetString(L"config", L"active_symbol", L"");
         m_setting_data.update_interval_sec = ini2.GetInt(L"config", L"update_interval_sec", 5);
         m_setting_data.tooltip_max_coins = ini2.GetInt(L"config", L"tooltip_max_coins", 8);
+        m_setting_data.tooltip_sort = ParseTooltipSortLocked(ini2.GetString(L"config", L"tooltip_sort", L"watchlist"));
+        m_setting_data.tooltip_show_focus = ini2.GetBool(L"config", L"tooltip_show_focus", true);
+        m_setting_data.tooltip_focus_mode = ParseTooltipFocusModeLocked(ini2.GetString(L"config", L"tooltip_focus_mode", L"follow_active"));
+        m_setting_data.tooltip_pinned_symbol = ini2.GetString(L"config", L"tooltip_pinned_symbol", L"");
+        m_setting_data.tooltip_focus_lines = ini2.GetInt(L"config", L"tooltip_focus_lines", 3);
         m_setting_data.stale_threshold_sec = ini2.GetInt(L"config", L"stale_threshold_sec", 30);
         // 第二行模式：优先新字段，其次兼容旧字段
         std::wstring mode = ini2.GetString(L"config", L"line2_mode", L"");
@@ -325,6 +341,11 @@ void CDataManager::LoadConfig(const std::wstring& config_dir)
     m_setting_data.active_symbol = ini.GetString(L"config", L"active_symbol", L"");
     m_setting_data.update_interval_sec = ini.GetInt(L"config", L"update_interval_sec", 5);
     m_setting_data.tooltip_max_coins = ini.GetInt(L"config", L"tooltip_max_coins", 8);
+    m_setting_data.tooltip_sort = ParseTooltipSortLocked(ini.GetString(L"config", L"tooltip_sort", L"watchlist"));
+    m_setting_data.tooltip_show_focus = ini.GetBool(L"config", L"tooltip_show_focus", true);
+    m_setting_data.tooltip_focus_mode = ParseTooltipFocusModeLocked(ini.GetString(L"config", L"tooltip_focus_mode", L"follow_active"));
+    m_setting_data.tooltip_pinned_symbol = ini.GetString(L"config", L"tooltip_pinned_symbol", L"");
+    m_setting_data.tooltip_focus_lines = ini.GetInt(L"config", L"tooltip_focus_lines", 3);
     m_setting_data.stale_threshold_sec = ini.GetInt(L"config", L"stale_threshold_sec", 30);
     std::wstring mode = ini.GetString(L"config", L"line2_mode", L"");
     if (_wcsicmp(mode.c_str(), L"roll_detail") == 0)
@@ -378,6 +399,11 @@ void CDataManager::SaveConfig() const
         ini.WriteString(L"config", L"active_symbol", m_setting_data.active_symbol);
         ini.WriteInt(L"config", L"update_interval_sec", m_setting_data.update_interval_sec);
         ini.WriteInt(L"config", L"tooltip_max_coins", m_setting_data.tooltip_max_coins);
+        ini.WriteString(L"config", L"tooltip_sort", TooltipSortToStringLocked(m_setting_data.tooltip_sort));
+        ini.WriteBool(L"config", L"tooltip_show_focus", m_setting_data.tooltip_show_focus);
+        ini.WriteString(L"config", L"tooltip_focus_mode", TooltipFocusModeToStringLocked(m_setting_data.tooltip_focus_mode));
+        ini.WriteString(L"config", L"tooltip_pinned_symbol", m_setting_data.tooltip_pinned_symbol);
+        ini.WriteInt(L"config", L"tooltip_focus_lines", m_setting_data.tooltip_focus_lines);
         ini.WriteInt(L"config", L"stale_threshold_sec", m_setting_data.stale_threshold_sec);
         const bool dual = (m_setting_data.line2_mode == SettingData::Line2Mode::DualSymbol);
         ini.WriteBool(L"config", L"second_line_dual_symbol", dual);
@@ -455,8 +481,15 @@ void CDataManager::EnsureDefaultsLocked()
         m_setting_data.update_interval_sec = 1;
     if (m_setting_data.tooltip_max_coins < 1)
         m_setting_data.tooltip_max_coins = 1;
+    if (m_setting_data.tooltip_focus_lines < 2)
+        m_setting_data.tooltip_focus_lines = 2;
+    if (m_setting_data.tooltip_focus_lines > 4)
+        m_setting_data.tooltip_focus_lines = 4;
     if (m_setting_data.stale_threshold_sec < 1)
         m_setting_data.stale_threshold_sec = 1;
+
+    m_setting_data.active_symbol = NormalizeSymbolFromIniLocked(m_setting_data.active_symbol);
+    m_setting_data.tooltip_pinned_symbol = NormalizeSymbolFromIniLocked(m_setting_data.tooltip_pinned_symbol);
 
     if (m_setting_data.active_symbol.empty())
         m_setting_data.active_symbol = m_setting_data.symbols.front();
@@ -489,6 +522,93 @@ void CDataManager::EnsureDefaultsLocked()
             m_line2_detail_index = 0;
         if (m_line2_detail_index >= n)
             m_line2_detail_index = n - 1;
+    }
+}
+
+std::wstring CDataManager::ToUpperLocked(const std::wstring& s) const
+{
+    std::wstring out = s;
+    for (auto& ch : out)
+    {
+        if (ch >= L'a' && ch <= L'z')
+            ch = (wchar_t)(ch - L'a' + L'A');
+    }
+    return out;
+}
+
+std::wstring CDataManager::NormalizeSymbolFromIniLocked(const std::wstring& s) const
+{
+    std::wstring out = s;
+    auto is_space = [](wchar_t ch)
+        {
+            return ch == L' ' || ch == L'\t' || ch == L'\r' || ch == L'\n';
+        };
+
+    // trim
+    while (!out.empty() && is_space(out.front()))
+        out.erase(out.begin());
+    while (!out.empty() && is_space(out.back()))
+        out.pop_back();
+
+    // strip quotes: "BTCUSDT" -> BTCUSDT
+    if (out.size() >= 2 && out.front() == L'\"' && out.back() == L'\"')
+    {
+        out = out.substr(1, out.size() - 2);
+        while (!out.empty() && is_space(out.front()))
+            out.erase(out.begin());
+        while (!out.empty() && is_space(out.back()))
+            out.pop_back();
+    }
+    return out;
+}
+
+SettingData::TooltipSort CDataManager::ParseTooltipSortLocked(const std::wstring& s) const
+{
+    std::wstring v = ToUpperLocked(s);
+    if (v == L"SYMBOL_ASC" || v == L"SYMBOL")
+        return SettingData::TooltipSort::SymbolAsc;
+    if (v == L"CHANGE_PCT_DESC" || v == L"CHG_DESC")
+        return SettingData::TooltipSort::ChangePctDesc;
+    if (v == L"CHANGE_PCT_ASC" || v == L"CHG_ASC")
+        return SettingData::TooltipSort::ChangePctAsc;
+    return SettingData::TooltipSort::Watchlist;
+}
+
+SettingData::TooltipFocusMode CDataManager::ParseTooltipFocusModeLocked(const std::wstring& s) const
+{
+    std::wstring v = ToUpperLocked(s);
+    if (v == L"PINNED")
+        return SettingData::TooltipFocusMode::Pinned;
+    if (v == L"TOP_MOVER" || v == L"TOP")
+        return SettingData::TooltipFocusMode::TopMover;
+    if (v == L"NONE" || v == L"OFF")
+        return SettingData::TooltipFocusMode::None;
+    return SettingData::TooltipFocusMode::FollowActive;
+}
+
+const wchar_t* CDataManager::TooltipSortToStringLocked(SettingData::TooltipSort v) const
+{
+    switch (v)
+    {
+    case SettingData::TooltipSort::SymbolAsc: return L"symbol_asc";
+    case SettingData::TooltipSort::ChangePctDesc: return L"change_pct_desc";
+    case SettingData::TooltipSort::ChangePctAsc: return L"change_pct_asc";
+    case SettingData::TooltipSort::Watchlist:
+    default:
+        return L"watchlist";
+    }
+}
+
+const wchar_t* CDataManager::TooltipFocusModeToStringLocked(SettingData::TooltipFocusMode v) const
+{
+    switch (v)
+    {
+    case SettingData::TooltipFocusMode::Pinned: return L"pinned";
+    case SettingData::TooltipFocusMode::TopMover: return L"top_mover";
+    case SettingData::TooltipFocusMode::None: return L"none";
+    case SettingData::TooltipFocusMode::FollowActive:
+    default:
+        return L"follow_active";
     }
 }
 
@@ -708,6 +828,271 @@ std::wstring CDataManager::FormatDetailLineLocked(const Quote& quote) const
     return wss.str();
 }
 
+std::vector<std::wstring> CDataManager::BuildTooltipOverviewOrderLocked() const
+{
+    std::vector<std::wstring> order = m_setting_data.symbols;
+    if (order.empty())
+        return order;
+
+    auto ci_less = [](const std::wstring& a, const std::wstring& b)
+        {
+            return _wcsicmp(a.c_str(), b.c_str()) < 0;
+        };
+
+    switch (m_setting_data.tooltip_sort)
+    {
+    case SettingData::TooltipSort::SymbolAsc:
+        std::sort(order.begin(), order.end(), ci_less);
+        break;
+    case SettingData::TooltipSort::ChangePctDesc:
+    case SettingData::TooltipSort::ChangePctAsc:
+    {
+        const bool desc = (m_setting_data.tooltip_sort == SettingData::TooltipSort::ChangePctDesc);
+        std::sort(order.begin(), order.end(),
+            [&](const std::wstring& sa, const std::wstring& sb)
+            {
+                const Quote qa = GetQuoteLocked(sa);
+                const Quote qb = GetQuoteLocked(sb);
+
+                // 失败放到末尾
+                if (qa.is_ok != qb.is_ok)
+                    return qa.is_ok > qb.is_ok;
+
+                if (!qa.is_ok && !qb.is_ok)
+                    return ci_less(sa, sb);
+
+                if (qa.change_pct != qb.change_pct)
+                    return desc ? (qa.change_pct > qb.change_pct) : (qa.change_pct < qb.change_pct);
+
+                return ci_less(sa, sb);
+            });
+        break;
+    }
+    case SettingData::TooltipSort::Watchlist:
+    default:
+        break;
+    }
+
+    // Tooltip 的“概览”需要在多币种下快速定位：确保 active 与 focus 在可见范围
+    const int max_show = (std::max)(1, m_setting_data.tooltip_max_coins);
+    const std::wstring active = m_setting_data.active_symbol;
+    const std::wstring focus = GetTooltipFocusSymbolLocked();
+
+    auto promote = [&](const std::wstring& s, int insert_pos)
+        {
+            if (s.empty())
+                return;
+            auto it = std::find_if(order.begin(), order.end(), [&](const std::wstring& v) { return _wcsicmp(v.c_str(), s.c_str()) == 0; });
+            if (it == order.end())
+                return;
+            int idx = (int)std::distance(order.begin(), it);
+            if (idx < max_show)
+                return;
+            std::wstring tmp = *it;
+            order.erase(it);
+            if (insert_pos < 0)
+                insert_pos = 0;
+            if (insert_pos > (int)order.size())
+                insert_pos = (int)order.size();
+            order.insert(order.begin() + insert_pos, tmp);
+        };
+
+    promote(active, 0);
+    if (!focus.empty() && _wcsicmp(focus.c_str(), active.c_str()) != 0)
+        promote(focus, 1);
+
+    return order;
+}
+
+std::wstring CDataManager::GetTooltipFocusSymbolLocked() const
+{
+    if (!m_setting_data.tooltip_show_focus)
+        return L"";
+
+    switch (m_setting_data.tooltip_focus_mode)
+    {
+    case SettingData::TooltipFocusMode::None:
+        return L"";
+    case SettingData::TooltipFocusMode::Pinned:
+        if (!m_setting_data.tooltip_pinned_symbol.empty())
+            return m_setting_data.tooltip_pinned_symbol;
+        return m_setting_data.active_symbol;
+    case SettingData::TooltipFocusMode::TopMover:
+    {
+        double best = -1.0;
+        std::wstring best_symbol = m_setting_data.active_symbol;
+        for (const auto& s : m_setting_data.symbols)
+        {
+            const Quote q = GetQuoteLocked(s);
+            if (!q.is_ok)
+                continue;
+            double v = std::fabs(q.change_pct);
+            if (v > best)
+            {
+                best = v;
+                best_symbol = s;
+            }
+        }
+        return best_symbol;
+    }
+    case SettingData::TooltipFocusMode::FollowActive:
+    default:
+        return m_setting_data.active_symbol;
+    }
+}
+
+std::wstring CDataManager::BuildTooltipLocked() const
+{
+    const time_t now = time(nullptr);
+    const int max_show = (std::max)(1, m_setting_data.tooltip_max_coins);
+    const std::wstring active = m_setting_data.active_symbol;
+    const std::wstring focus = GetTooltipFocusSymbolLocked();
+    const int focus_lines = m_setting_data.tooltip_focus_lines;
+
+    int ok_count{};
+    int stale_count{};
+    int fail_count{};
+
+    // 统计全量 watchlist 状态（不是只统计 Tooltip 可见部分）
+    for (const auto& s : m_setting_data.symbols)
+    {
+        const Quote q = GetQuoteLocked(s);
+        if (q.is_ok)
+        {
+            ++ok_count;
+            if (q.update_time > 0 && (now - q.update_time) > m_setting_data.stale_threshold_sec)
+                ++stale_count;
+        }
+        else
+        {
+            ++fail_count;
+        }
+    }
+
+    std::wstringstream wss;
+    const auto order = BuildTooltipOverviewOrderLocked();
+
+    // 概览：每币一行，列分隔 ` | `
+    int shown{};
+    for (const auto& s : order)
+    {
+        if (shown >= max_show)
+            break;
+
+        const Quote q = GetQuoteLocked(s);
+        const bool stale = (q.is_ok && q.update_time > 0 && (now - q.update_time) > m_setting_data.stale_threshold_sec);
+
+        if (!active.empty() && _wcsicmp(s.c_str(), active.c_str()) == 0)
+            wss << L"> ";
+        else
+            wss << L"  ";
+
+        wss << s
+            << L" | " << FormatPrice(q.last)
+            << L" | " << FormatSignedPct(q.change_pct);
+
+        if (!q.is_ok)
+        {
+            wss << L" x";
+            if (!q.error.empty())
+                wss << L" (" << q.error << L")";
+        }
+        else if (stale)
+        {
+            wss << L" *";
+        }
+        wss << L"\n";
+        ++shown;
+    }
+
+    if ((int)order.size() > shown)
+        wss << L"... +" << (order.size() - shown) << L" more\n";
+
+    // 聚焦区：2~4 行（由 tooltip_focus_lines 控制）
+    if (!focus.empty())
+    {
+        const Quote q = GetQuoteLocked(focus);
+        const bool stale = (q.is_ok && q.update_time > 0 && (now - q.update_time) > m_setting_data.stale_threshold_sec);
+
+        wss << L"\n";
+
+        // 1) 聚焦摘要行
+        wss << L"FOCUS " << focus << L" " << FormatPrice(q.last) << L" (" << FormatSignedPct(q.change_pct) << L")";
+        if (!q.is_ok)
+            wss << L" x";
+        else if (stale)
+            wss << L" *";
+        wss << L"\n";
+
+        std::vector<std::wstring> detail_lines;
+        detail_lines.reserve(5);
+        if (!q.is_ok)
+        {
+            if (!q.error.empty())
+                detail_lines.push_back(std::wstring(L"ERROR ") + q.error);
+        }
+
+        {
+            std::wstring hl = L"24h H/L ";
+            hl += FormatPrice(q.high_24h);
+            hl += L" / ";
+            hl += FormatPrice(q.low_24h);
+            detail_lines.push_back(hl);
+        }
+        {
+            std::wstring vol = L"24h VOL ";
+            vol += FormatCompactNumber(q.volume_24h);
+            detail_lines.push_back(vol);
+        }
+        {
+            std::wstring ba = L"B/A ";
+            if (q.bid > 0.0 && q.ask > 0.0)
+                ba += FormatPrice(q.bid) + std::wstring(L" / ") + FormatPrice(q.ask);
+            else
+                ba += L"--";
+            detail_lines.push_back(ba);
+        }
+        {
+            std::wstring upd = L"UPD ";
+            upd += FormatClockTime(q.update_time);
+            if (q.update_time > 0)
+                upd += std::wstring(L" (") + std::to_wstring((int)(now - q.update_time)) + L"s)";
+            detail_lines.push_back(upd);
+        }
+
+        const int extra = (std::max)(0, focus_lines - 1);
+        const int take = (std::min)(extra, (int)detail_lines.size());
+        for (int i = 0; i < take; ++i)
+            wss << detail_lines[(size_t)i] << L"\n";
+    }
+
+    // 状态行
+    wss
+        << L"\n"
+        << L"Updated " << FormatClockTime(m_last_success_time)
+        << L" | Int " << m_setting_data.update_interval_sec << L"s";
+    if (m_backoff_sec > 0)
+        wss << L" | Backoff " << m_backoff_sec << L"s";
+
+    wss
+        << L" | Src Binance(REST)"
+        << L" | Watch " << m_setting_data.symbols.size()
+        << L" | OK " << ok_count;
+    if (stale_count > 0)
+        wss << L" Stale " << stale_count;
+    if (fail_count > 0)
+        wss << L" Fail " << fail_count;
+
+    wss
+        << L" | Sort " << TooltipSortToStringLocked(m_setting_data.tooltip_sort)
+        << L" | Focus " << TooltipFocusModeToStringLocked(m_setting_data.tooltip_focus_mode);
+
+    wss
+        << L" | Line2 " << (m_setting_data.line2_mode == SettingData::Line2Mode::DualSymbol ? L"dual" : L"detail");
+
+    return wss.str();
+}
+
 void CDataManager::RebuildRenderCacheLocked()
 {
     EnsureDefaultsLocked();
@@ -758,48 +1143,8 @@ void CDataManager::RebuildRenderCacheLocked()
     m_render_cache.up_is_red = m_setting_data.up_is_red;
     m_render_cache.debug_show_bounds = m_setting_data.debug_show_bounds;
 
-    // Tooltip：多币种概览 + 状态行（Phase 4 完善）
-    std::wstringstream tip;
-    int shown = 0;
-    int max_show = m_setting_data.tooltip_max_coins;
-    time_t now = time(nullptr);
-    // active_symbol 优先置顶，便于在多币种下快速定位
-    std::vector<std::wstring> ordered;
-    ordered.reserve(symbols.size());
-    if (!active.empty())
-        ordered.push_back(active);
-    for (const auto& s : symbols)
-    {
-        if (!active.empty() && _wcsicmp(s.c_str(), active.c_str()) == 0)
-            continue;
-        ordered.push_back(s);
-    }
-
-    for (const auto& s : ordered)
-    {
-        if (shown >= max_show)
-            break;
-        Quote q = GetQuoteLocked(s);
-
-        if (!active.empty() && _wcsicmp(s.c_str(), active.c_str()) == 0)
-            tip << L"> ";
-        tip << s << L" | " << FormatPrice(q.last) << L" | " << FormatSignedPct(q.change_pct);
-        if (!q.is_ok)
-            tip << L" x";
-        else if (q.update_time > 0 && (now - q.update_time) > m_setting_data.stale_threshold_sec)
-            tip << L" *";
-        tip << L"\n";
-        ++shown;
-    }
-    if ((int)ordered.size() > shown)
-        tip << L"... +" << (ordered.size() - shown) << L" more\n";
-
-    tip << L"Updated " << FormatClockTime(m_last_success_time)
-        << L" | Interval " << m_setting_data.update_interval_sec << L"s";
-    if (m_backoff_sec > 0)
-        tip << L" | Backoff " << m_backoff_sec << L"s";
-    tip << L" | Line2 " << (m_setting_data.line2_mode == SettingData::Line2Mode::DualSymbol ? L"dual" : L"detail");
-    m_render_cache.tooltip = tip.str();
+    // Tooltip：概览 + 聚焦 + 状态（Phase 4）
+    m_render_cache.tooltip = BuildTooltipLocked();
 
     // 样例文本：用于宽度稳定；Phase 3 再按布局动态生成
     m_render_cache.sample = L"BTCUSDT 000000.00 +00.00%";
