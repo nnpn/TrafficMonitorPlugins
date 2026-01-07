@@ -5,14 +5,26 @@
 #undef min
 #undef max
 
+void CPluginTemplateItem::SetLineIndex(int line_index)
+{
+    m_line_index = line_index;
+}
+
 const wchar_t* CPluginTemplateItem::GetItemName() const
 {
-    return g_data.StringRes(IDS_PLUGIN_ITEM_NAME);
+    m_name_cache = g_data.StringRes(IDS_PLUGIN_ITEM_NAME).GetString();
+    if (m_line_index == 0)
+        m_name_cache += L" (1)";
+    else
+        m_name_cache += L" (2)";
+    return m_name_cache.c_str();
 }
 
 const wchar_t* CPluginTemplateItem::GetItemId() const
 {
-    return L"BtcPrice01";
+    m_id_cache = L"BtcPrice01";
+    m_id_cache += (m_line_index == 0 ? L"A" : L"B");
+    return m_id_cache.c_str();
 }
 
 const wchar_t* CPluginTemplateItem::GetItemLableText() const
@@ -27,9 +39,8 @@ const wchar_t* CPluginTemplateItem::GetItemValueText() const
 
 const wchar_t* CPluginTemplateItem::GetItemValueSampleText() const
 {
-    static std::wstring sample;
-    sample = g_data.GetSampleText();
-    return sample.c_str();
+    m_sample_cache = g_data.GetSampleText();
+    return m_sample_cache.c_str();
 }
 
 bool CPluginTemplateItem::IsCustomDraw() const
@@ -45,7 +56,9 @@ int CPluginTemplateItem::GetItemWidthEx(void * hDC) const
     int w1 = pDC->GetTextExtent(lines.first.c_str()).cx;
     int w2 = pDC->GetTextExtent(lines.second.c_str()).cx;
     int ws = pDC->GetTextExtent(sample.c_str()).cx;
-    return std::max(ws, std::max(w1, w2));
+
+    int space_w = pDC->GetTextExtent(L" ").cx;
+    return std::max(ws, std::max(w1, w2)) + space_w;
 }
 
 void CPluginTemplateItem::DrawItem(void* hDC, int x, int y, int w, int h, bool dark_mode)
@@ -55,42 +68,25 @@ void CPluginTemplateItem::DrawItem(void* hDC, int x, int y, int w, int h, bool d
 
     const auto lines = g_data.GetTaskbarLines();
     const bool right_align = g_data.IsRightAlign();
+    const std::wstring& text = (m_line_index == 0 ? lines.first : lines.second);
 
     // 基础文本颜色（Phase 3 再按涨跌着色）
     COLORREF text_color = dark_mode ? RGB(255, 255, 255) : RGB(0, 0, 0);
     pDC->SetBkMode(TRANSPARENT);
     pDC->SetTextColor(text_color);
 
-    TEXTMETRIC tm{};
-    pDC->GetTextMetrics(&tm);
-    int line_height = tm.tmHeight + tm.tmExternalLeading;
-    if (line_height <= 0)
-        line_height = 12;
-
-    int max_lines = h / line_height;
     UINT flags = DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS;
     if (right_align)
         flags |= DT_RIGHT;
 
-    if (max_lines >= 2)
+    // 视觉间距：与前一列保持约一个空格宽度（右对齐模式下不强制）
+    if (!right_align)
     {
-        int total_h = line_height * 2;
-        int top = rect.top + (rect.Height() - total_h) / 2;
-
-        CRect r1 = rect;
-        r1.top = top;
-        r1.bottom = top + line_height;
-        pDC->DrawText(lines.first.c_str(), r1, flags | DT_VCENTER);
-
-        CRect r2 = rect;
-        r2.top = top + line_height;
-        r2.bottom = r2.top + line_height;
-        pDC->DrawText(lines.second.c_str(), r2, flags | DT_VCENTER);
+        int space_w = pDC->GetTextExtent(L" ").cx;
+        rect.left += space_w;
     }
-    else
-    {
-        pDC->DrawText(lines.first.c_str(), rect, flags | DT_VCENTER);
-    }
+
+    pDC->DrawText(text.c_str(), rect, flags | DT_VCENTER);
 }
 
 int CPluginTemplateItem::OnMouseEvent(MouseEventType type, int x, int y, void* hWnd, int flag)

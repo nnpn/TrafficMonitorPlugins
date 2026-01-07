@@ -27,7 +27,7 @@ private:
 
 private:
     static CPluginTemplate m_instance;
-    CPluginTemplateItem m_item;
+    CPluginTemplateItem m_items[2];
     std::wstring m_tooltip_info;
 
     bool m_is_thread_runing{};

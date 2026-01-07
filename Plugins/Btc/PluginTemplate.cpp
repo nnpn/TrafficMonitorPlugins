@@ -7,6 +7,8 @@ CPluginTemplate CPluginTemplate::m_instance;
 
 CPluginTemplate::CPluginTemplate()
 {
+    m_items[0].SetLineIndex(0);
+    m_items[1].SetLineIndex(1);
 }
 
 CPluginTemplate& CPluginTemplate::Instance()
@@ -19,7 +21,9 @@ IPluginItem* CPluginTemplate::GetItem(int index)
     switch (index)
     {
     case 0:
-        return &m_item;
+        return &m_items[0];
+    case 1:
+        return &m_items[1];
     default:
         break;
     }
