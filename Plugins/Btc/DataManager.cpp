@@ -50,6 +50,77 @@ namespace
         return out;
     }
 
+    long long GetFileSizeBytes(const std::wstring& path)
+    {
+        WIN32_FILE_ATTRIBUTE_DATA fad{};
+        if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &fad))
+            return -1;
+        if (fad.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            return -1;
+        ULARGE_INTEGER uli{};
+        uli.LowPart = fad.nFileSizeLow;
+        uli.HighPart = fad.nFileSizeHigh;
+        return (long long)uli.QuadPart;
+    }
+
+    bool ReadAllBytes(const std::wstring& path, std::vector<unsigned char>& out)
+    {
+        out.clear();
+        std::ifstream file(path, std::ios::binary);
+        if (!file)
+            return false;
+        file.seekg(0, std::ios::end);
+        std::streamoff size = file.tellg();
+        if (size <= 0)
+            return true;
+        file.seekg(0, std::ios::beg);
+        out.resize((size_t)size);
+        file.read((char*)out.data(), size);
+        return true;
+    }
+
+    bool WriteUtf8BomBytes(const std::wstring& path, const std::string& utf8)
+    {
+        std::ofstream file(path, std::ios::binary);
+        if (!file)
+            return false;
+        const unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
+        file.write((const char*)bom, sizeof(bom));
+        file.write(utf8.data(), (std::streamsize)utf8.size());
+        return true;
+    }
+
+    bool TryConvertIniToUtf8BomIfUtf16(const std::wstring& path)
+    {
+        // utilities::CIniHelper 读取 UTF-16 ini 时会因为 NUL 字节导致内容为空，从而触发“覆盖默认模板”的误判。
+        // 这里在检测到 UTF-16 BOM 时将其转换为 UTF-8(BOM) 后覆写原文件，以保证后续读取正常且不丢配置。
+        std::vector<unsigned char> bytes;
+        if (!ReadAllBytes(path, bytes))
+            return false;
+        if (bytes.size() < 2)
+            return false;
+
+        const bool utf16le = (bytes[0] == 0xFF && bytes[1] == 0xFE);
+        const bool utf16be = (bytes[0] == 0xFE && bytes[1] == 0xFF);
+        if (!utf16le && !utf16be)
+            return false;
+
+        std::wstring w;
+        w.reserve((bytes.size() - 2) / 2);
+        for (size_t i = 2; i + 1 < bytes.size(); i += 2)
+        {
+            unsigned char b0 = bytes[i];
+            unsigned char b1 = bytes[i + 1];
+            wchar_t ch = (wchar_t)(utf16le ? (b0 | (b1 << 8)) : (b1 | (b0 << 8)));
+            if (ch == 0)
+                continue;
+            w.push_back(ch);
+        }
+
+        std::string utf8 = utilities::StringHelper::UnicodeToStr(w.c_str(), true);
+        return WriteUtf8BomBytes(path, utf8);
+    }
+
     bool FileExists(const std::wstring& path)
     {
         DWORD attr = GetFileAttributesW(path.c_str());
@@ -336,9 +407,28 @@ void CDataManager::LoadConfig(const std::wstring& config_dir)
     utilities::CIniHelper ini(m_config_path);
     if (ini.IsEmpty())
     {
-        // 文件存在但为空/不可读时重建模板
-        WriteUtf8BomTextFile(m_config_path, BuildDefaultConfigTemplate());
+        // 文件存在但读取为空时：
+        // - 仅当文件长度为 0 才重建模板
+        // - 若是 UTF-16/编码问题，先尝试转为 UTF-8(BOM) 再读取，避免“重启后配置被覆盖”
+        const long long size = GetFileSizeBytes(m_config_path);
+        if (size == 0)
+        {
+            WriteUtf8BomTextFile(m_config_path, BuildDefaultConfigTemplate());
+        }
+        else
+        {
+            TryConvertIniToUtf8BomIfUtf16(m_config_path);
+        }
+
         utilities::CIniHelper ini2(m_config_path);
+        if (ini2.IsEmpty())
+        {
+            DebugLog(1, L"LoadConfig failed (ini empty): %s", m_config_path.c_str());
+            std::lock_guard<std::mutex> lock(m_mutex);
+            EnsureDefaultsLocked();
+            RebuildRenderCacheLocked();
+            return;
+        }
         ini2.GetStringList(L"config", L"symbols", m_setting_data.symbols, std::vector<std::wstring>{});
         m_setting_data.active_symbol = ini2.GetString(L"config", L"active_symbol", L"");
         m_setting_data.update_interval_sec = ini2.GetInt(L"config", L"update_interval_sec", 5);
