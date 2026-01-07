@@ -264,6 +264,11 @@
     <ClInclude Include="PluginTemplateItem.h" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\\..\\utilities\\utilities.vcxproj">
+      <Project>{FC324049-5EF6-4561-ABC6-D2FDD68A8768}</Project>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
     <ClCompile Include="DataManager.cpp" />
     <ClCompile Include="OptionsDlg.cpp" />
     <ClCompile Include="pch.cpp">
