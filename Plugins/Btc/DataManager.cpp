@@ -630,19 +630,6 @@ void CDataManager::EnsureDefaultsLocked()
     }
     if (!found && !m_setting_data.symbols.empty())
         m_setting_data.active_symbol = m_setting_data.symbols.front();
-
-    // roll_detail 索引合法化
-    auto items = GetLine2DetailItemsLocked();
-    if (items.empty())
-        m_line2_detail_index = 0;
-    else
-    {
-        int n = (int)items.size();
-        if (m_line2_detail_index < 0)
-            m_line2_detail_index = 0;
-        if (m_line2_detail_index >= n)
-            m_line2_detail_index = n - 1;
-    }
 }
 
 std::wstring CDataManager::ToUpperLocked(const std::wstring& s) const
@@ -916,10 +903,8 @@ std::wstring CDataManager::FormatDetailLineLocked(const Quote& quote) const
     if (items.empty())
         return L"--";
 
-    int idx = m_line2_detail_index;
-    if (idx < 0) idx = 0;
-    if (idx >= (int)items.size()) idx = (int)items.size() - 1;
-    const Line2DetailItem item = items[(size_t)idx];
+    // 仅保留左键交互后，明细项不再滚动；默认显示列表中的第一项
+    const Line2DetailItem item = items.front();
 
     std::wstringstream wss;
     switch (item)
@@ -1459,51 +1444,6 @@ void CDataManager::StepActiveSymbol(int delta)
         next += n;
     m_setting_data.active_symbol = m_setting_data.symbols[(size_t)next];
     RebuildRenderCacheLocked();
-}
-
-void CDataManager::StepLine2Detail(int delta)
-{
-    std::lock_guard<std::mutex> lock(m_mutex);
-    EnsureDefaultsLocked();
-    if (m_setting_data.line2_mode != SettingData::Line2Mode::RollDetail)
-        return;
-
-    auto items = GetLine2DetailItemsLocked();
-    if (items.size() <= 1)
-        return;
-
-    int n = (int)items.size();
-    int next = (m_line2_detail_index + delta) % n;
-    if (next < 0)
-        next += n;
-    m_line2_detail_index = next;
-    RebuildRenderCacheLocked();
-}
-
-void CDataManager::ToggleLine2Mode()
-{
-    std::lock_guard<std::mutex> lock(m_mutex);
-    EnsureDefaultsLocked();
-    if (m_setting_data.line2_mode == SettingData::Line2Mode::DualSymbol)
-        m_setting_data.line2_mode = SettingData::Line2Mode::RollDetail;
-    else
-        m_setting_data.line2_mode = SettingData::Line2Mode::DualSymbol;
-    m_line2_detail_index = 0;
-    RebuildRenderCacheLocked();
-}
-
-void CDataManager::ToggleDebugBounds()
-{
-    std::lock_guard<std::mutex> lock(m_mutex);
-    EnsureDefaultsLocked();
-    m_setting_data.debug_show_bounds = !m_setting_data.debug_show_bounds;
-    RebuildRenderCacheLocked();
-}
-
-bool CDataManager::IsLine2RollDetailMode() const
-{
-    std::lock_guard<std::mutex> lock(m_mutex);
-    return (m_setting_data.line2_mode == SettingData::Line2Mode::RollDetail);
 }
 
 std::pair<std::wstring, std::wstring> CDataManager::GetTaskbarLines() const

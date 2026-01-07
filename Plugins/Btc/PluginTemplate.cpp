@@ -118,9 +118,7 @@ void CPluginTemplate::OnExtenedInfo(ExtendedInfoIndex index, const wchar_t* data
 
 int CPluginTemplate::GetCommandCount()
 {
-    // 注意：部分主程序版本不会将鼠标滚轮事件下发到插件区域，
-    // 因此提供命令作为交互兜底（可在主程序右键菜单中访问）。
-    return 7;
+    return 1;
 }
 
 const wchar_t* CPluginTemplate::GetCommandName(int command_index)
@@ -129,18 +127,6 @@ const wchar_t* CPluginTemplate::GetCommandName(int command_index)
     {
     case 0:
         return g_data.StringRes(IDS_COMMAND_UPDATE).GetString();
-    case 1:
-        return g_data.StringRes(IDS_COMMAND_NEXT_SYMBOL).GetString();
-    case 2:
-        return g_data.StringRes(IDS_COMMAND_PREV_SYMBOL).GetString();
-    case 3:
-        return g_data.StringRes(IDS_COMMAND_TOGGLE_LINE2).GetString();
-    case 4:
-        return g_data.StringRes(IDS_COMMAND_NEXT_DETAIL).GetString();
-    case 5:
-        return g_data.StringRes(IDS_COMMAND_PREV_DETAIL).GetString();
-    case 6:
-        return g_data.StringRes(IDS_COMMAND_TOGGLE_BOUNDS).GetString();
     default:
         break;
     }
@@ -154,37 +140,9 @@ void CPluginTemplate::OnPluginCommand(int command_index, void* hWnd, void* para)
     case 0:
         SendQuoteRequest();
         break;
-    case 1:
-        g_data.StepActiveSymbol(1);
-        break;
-    case 2:
-        g_data.StepActiveSymbol(-1);
-        break;
-    case 3:
-        g_data.ToggleLine2Mode();
-        break;
-    case 4:
-        if (g_data.IsLine2RollDetailMode())
-            g_data.StepLine2Detail(1);
-        else
-            g_data.StepActiveSymbol(1);
-        break;
-    case 5:
-        if (g_data.IsLine2RollDetailMode())
-            g_data.StepLine2Detail(-1);
-        else
-            g_data.StepActiveSymbol(-1);
-        break;
-    case 6:
-        g_data.ToggleDebugBounds();
-        g_data.SaveConfig();
-        break;
     default:
         break;
     }
-
-    if (hWnd != nullptr)
-        ::InvalidateRect((HWND)hWnd, nullptr, TRUE);
 }
 
 ITMPlugin* TMPluginGetInstance()

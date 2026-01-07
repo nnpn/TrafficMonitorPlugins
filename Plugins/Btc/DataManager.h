@@ -143,26 +143,6 @@ public:
     void StepActiveSymbol(int delta);
 
     /**
-     * @brief 第二行（roll_detail）明细滚动项切换
-     */
-    void StepLine2Detail(int delta);
-
-    /**
-     * @brief 切换第二行模式（dual_symbol <-> roll_detail），仅影响运行态
-     */
-    void ToggleLine2Mode();
-
-    /**
-     * @brief 调试：边框开关（可持久化）
-     */
-    void ToggleDebugBounds();
-
-    /**
-     * @brief 当前第二行是否为 roll_detail 模式
-     */
-    bool IsLine2RollDetailMode() const;
-
-    /**
      * @brief 获取当前可绘制的两行文本（线程安全快照）
      */
     std::pair<std::wstring, std::wstring> GetTaskbarLines() const;
@@ -291,6 +271,4 @@ private:
     time_t m_last_success_time{};
     int m_backoff_sec{};
 
-    // Phase 3：roll_detail 运行态索引（不持久化）
-    int m_line2_detail_index{};
 };

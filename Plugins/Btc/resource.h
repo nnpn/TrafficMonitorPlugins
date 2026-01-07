@@ -9,12 +9,6 @@
 #define IDS_COMMAND_UPDATE              106
 #define IDS_PLUGIN_ITEM_NAME_LINE1      107
 #define IDS_PLUGIN_ITEM_NAME_LINE2      108
-#define IDS_COMMAND_NEXT_SYMBOL         109
-#define IDS_COMMAND_PREV_SYMBOL         110
-#define IDS_COMMAND_TOGGLE_LINE2        111
-#define IDS_COMMAND_NEXT_DETAIL         112
-#define IDS_COMMAND_PREV_DETAIL         113
-#define IDS_COMMAND_TOGGLE_BOUNDS       114
  
 // Next default values for new objects
 // 
@@ -23,6 +17,6 @@
 #define _APS_NEXT_RESOURCE_VALUE        104
 #define _APS_NEXT_COMMAND_VALUE         40001
 #define _APS_NEXT_CONTROL_VALUE         1000
-#define _APS_NEXT_SYMED_VALUE           115
+#define _APS_NEXT_SYMED_VALUE           109
 #endif
 #endif

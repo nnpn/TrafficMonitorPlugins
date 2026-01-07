@@ -114,53 +114,13 @@ void CPluginTemplateItem::DrawItem(void* hDC, int x, int y, int w, int h, bool d
 
 int CPluginTemplateItem::OnMouseEvent(MouseEventType type, int x, int y, void* hWnd, int flag)
 {
-    const bool line2_roll_detail = (m_line_index == 1) && g_data.IsLine2RollDetailMode();
-    const bool ctrl_down = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
-    const bool shift_down = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
     switch (type)
     {
     case IPluginItem::MT_LCLICKED:
-        // 兼容：如果主程序不下发滚轮事件，至少可以用点击切换币种
-        g_data.DebugLog(2, L"LClick line=%d flag=%d", m_line_index, flag);
-        g_data.StepActiveSymbol(shift_down ? -1 : 1);
+        // 仅保留左键单击：切换监控币种（active_symbol）
+        g_data.StepActiveSymbol(1);
         ::InvalidateRect((HWND)hWnd, nullptr, TRUE);
         return 1;
-    case IPluginItem::MT_DBCLICKED:
-        // 快捷切换第二行模式（不持久化）
-        g_data.DebugLog(2, L"DBClick line=%d flag=%d", m_line_index, flag);
-        g_data.ToggleLine2Mode();
-        ::InvalidateRect((HWND)hWnd, nullptr, TRUE);
-        return 1;
-    case IPluginItem::MT_WHEEL_UP:
-    {
-        auto before = g_data.GetTaskbarLinesEx();
-        // 默认：滚轮切换币种（多币种滚动列表）
-        // Ctrl + 滚轮：当第二行处于 roll_detail 模式时切换明细项
-        if (line2_roll_detail && ctrl_down)
-            g_data.StepLine2Detail(-1);
-        else
-            g_data.StepActiveSymbol(-1);
-        auto after = g_data.GetTaskbarLinesEx();
-        g_data.DebugLog(2, L"WheelUp line=%d ctrl=%d flag=%d: '%s' -> '%s'", m_line_index, ctrl_down ? 1 : 0, flag, before.line1.c_str(), after.line1.c_str());
-        ::InvalidateRect((HWND)hWnd, nullptr, TRUE);
-        return 1;
-    }
-    case IPluginItem::MT_WHEEL_DOWN:
-    {
-        auto before = g_data.GetTaskbarLinesEx();
-        if (line2_roll_detail && ctrl_down)
-            g_data.StepLine2Detail(1);
-        else
-            g_data.StepActiveSymbol(1);
-        auto after = g_data.GetTaskbarLinesEx();
-        g_data.DebugLog(2, L"WheelDown line=%d ctrl=%d flag=%d: '%s' -> '%s'", m_line_index, ctrl_down ? 1 : 0, flag, before.line1.c_str(), after.line1.c_str());
-        ::InvalidateRect((HWND)hWnd, nullptr, TRUE);
-        return 1;
-    }
-    case IPluginItem::MT_RCLICKED:
-        g_data.DebugLog(2, L"RClick line=%d flag=%d", m_line_index, flag);
-        // 返回 0 让主程序弹出默认菜单（包含插件命令）
-        return 0;
     default:
         break;
     }
