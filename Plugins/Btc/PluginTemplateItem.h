@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "PluginInterface.h"
+#include <string>
 
 class CPluginTemplateItem : public IPluginItem
 {
