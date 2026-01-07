@@ -119,21 +119,31 @@ int CPluginTemplateItem::OnMouseEvent(MouseEventType type, int x, int y, void* h
     switch (type)
     {
     case IPluginItem::MT_WHEEL_UP:
+    {
+        auto before = g_data.GetTaskbarLinesEx();
         // 默认：滚轮切换币种（多币种滚动列表）
         // Ctrl + 滚轮：当第二行处于 roll_detail 模式时切换明细项
         if (line2_roll_detail && ctrl_down)
             g_data.StepLine2Detail(-1);
         else
             g_data.StepActiveSymbol(-1);
+        auto after = g_data.GetTaskbarLinesEx();
+        g_data.DebugLog(2, L"WheelUp line=%d ctrl=%d flag=%d: '%s' -> '%s'", m_line_index, ctrl_down ? 1 : 0, flag, before.line1.c_str(), after.line1.c_str());
         ::InvalidateRect((HWND)hWnd, nullptr, TRUE);
         return 1;
+    }
     case IPluginItem::MT_WHEEL_DOWN:
+    {
+        auto before = g_data.GetTaskbarLinesEx();
         if (line2_roll_detail && ctrl_down)
             g_data.StepLine2Detail(1);
         else
             g_data.StepActiveSymbol(1);
+        auto after = g_data.GetTaskbarLinesEx();
+        g_data.DebugLog(2, L"WheelDown line=%d ctrl=%d flag=%d: '%s' -> '%s'", m_line_index, ctrl_down ? 1 : 0, flag, before.line1.c_str(), after.line1.c_str());
         ::InvalidateRect((HWND)hWnd, nullptr, TRUE);
         return 1;
+    }
     default:
         break;
     }
