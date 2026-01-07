@@ -148,6 +148,11 @@ public:
     void StepLine2Detail(int delta);
 
     /**
+     * @brief 切换第二行模式（dual_symbol <-> roll_detail），仅影响运行态
+     */
+    void ToggleLine2Mode();
+
+    /**
      * @brief 当前第二行是否为 roll_detail 模式
      */
     bool IsLine2RollDetailMode() const;

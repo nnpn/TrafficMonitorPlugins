@@ -1224,6 +1224,11 @@ std::wstring CDataManager::BuildTooltipLocked() const
     wss
         << L" | Line2 " << (m_setting_data.line2_mode == SettingData::Line2Mode::DualSymbol ? L"dual" : L"detail");
 
+    if (m_setting_data.debug_log_enabled)
+        wss << L" | DBG L" << m_setting_data.debug_log_level;
+    if (m_setting_data.debug_show_bounds)
+        wss << L" | Bounds";
+
     return wss.str();
 }
 
@@ -1472,6 +1477,18 @@ void CDataManager::StepLine2Detail(int delta)
     if (next < 0)
         next += n;
     m_line2_detail_index = next;
+    RebuildRenderCacheLocked();
+}
+
+void CDataManager::ToggleLine2Mode()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    EnsureDefaultsLocked();
+    if (m_setting_data.line2_mode == SettingData::Line2Mode::DualSymbol)
+        m_setting_data.line2_mode = SettingData::Line2Mode::RollDetail;
+    else
+        m_setting_data.line2_mode = SettingData::Line2Mode::DualSymbol;
+    m_line2_detail_index = 0;
     RebuildRenderCacheLocked();
 }
 

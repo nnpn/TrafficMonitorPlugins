@@ -116,8 +116,21 @@ int CPluginTemplateItem::OnMouseEvent(MouseEventType type, int x, int y, void* h
 {
     const bool line2_roll_detail = (m_line_index == 1) && g_data.IsLine2RollDetailMode();
     const bool ctrl_down = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    const bool shift_down = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
     switch (type)
     {
+    case IPluginItem::MT_LCLICKED:
+        // 兼容：如果主程序不下发滚轮事件，至少可以用点击切换币种
+        g_data.DebugLog(2, L"LClick line=%d flag=%d", m_line_index, flag);
+        g_data.StepActiveSymbol(shift_down ? -1 : 1);
+        ::InvalidateRect((HWND)hWnd, nullptr, TRUE);
+        return 1;
+    case IPluginItem::MT_DBCLICKED:
+        // 快捷切换第二行模式（不持久化）
+        g_data.DebugLog(2, L"DBClick line=%d flag=%d", m_line_index, flag);
+        g_data.ToggleLine2Mode();
+        ::InvalidateRect((HWND)hWnd, nullptr, TRUE);
+        return 1;
     case IPluginItem::MT_WHEEL_UP:
     {
         auto before = g_data.GetTaskbarLinesEx();
@@ -144,6 +157,10 @@ int CPluginTemplateItem::OnMouseEvent(MouseEventType type, int x, int y, void* h
         ::InvalidateRect((HWND)hWnd, nullptr, TRUE);
         return 1;
     }
+    case IPluginItem::MT_RCLICKED:
+        g_data.DebugLog(2, L"RClick line=%d flag=%d", m_line_index, flag);
+        // 返回 0 让主程序弹出默认菜单（包含插件命令）
+        return 0;
     default:
         break;
     }
