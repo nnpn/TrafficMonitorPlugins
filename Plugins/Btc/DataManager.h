@@ -142,6 +142,11 @@ public:
      */
     int GetUpdateIntervalSec() const;
 
+    /**
+     * @brief 获取实际刷新间隔（秒）：包含失败退避
+     */
+    int GetEffectiveIntervalSec() const;
+
     SettingData m_setting_data;
 
 private:

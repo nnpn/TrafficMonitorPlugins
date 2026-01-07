@@ -52,7 +52,7 @@ void CPluginTemplate::DataRequired()
 {
     // 轮询触发：根据刷新间隔请求一次报价更新；绘制与 Tooltip 读取缓存即可。
     time_t now = time(nullptr);
-    int interval = g_data.GetUpdateIntervalSec();
+    int interval = g_data.GetEffectiveIntervalSec();
     if (!m_is_thread_runing && (now - (time_t)m_last_request_time) >= interval)
         SendQuoteRequest();
 }

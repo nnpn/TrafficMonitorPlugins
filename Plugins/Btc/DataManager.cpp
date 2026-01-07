@@ -467,7 +467,18 @@ void CDataManager::RebuildRenderCacheLocked()
     if ((int)symbols.size() > shown)
         tip << L"... +" << (symbols.size() - shown) << L" more\n";
 
-    tip << L"Interval " << m_setting_data.update_interval_sec << L"s";
+    auto format_time = [](time_t t) -> std::wstring
+        {
+            if (t <= 0)
+                return L"--:--:--";
+            tm tm_local{};
+            localtime_s(&tm_local, &t);
+            wchar_t buf[32]{};
+            wcsftime(buf, _countof(buf), L"%H:%M:%S", &tm_local);
+            return buf;
+        };
+
+    tip << L"Updated " << format_time(m_last_success_time) << L" | Interval " << m_setting_data.update_interval_sec << L"s";
     if (m_backoff_sec > 0)
         tip << L" | Backoff " << m_backoff_sec << L"s";
     m_render_cache.tooltip = tip.str();
@@ -481,6 +492,15 @@ int CDataManager::GetUpdateIntervalSec() const
     std::lock_guard<std::mutex> lock(m_mutex);
     int sec = m_setting_data.update_interval_sec;
     return (sec < 1) ? 1 : sec;
+}
+
+int CDataManager::GetEffectiveIntervalSec() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    int base = m_setting_data.update_interval_sec;
+    if (base < 1)
+        base = 1;
+    return std::max(base, m_backoff_sec);
 }
 
 bool CDataManager::RequestRealtimeQuotes()
@@ -504,7 +524,13 @@ bool CDataManager::RequestRealtimeQuotes()
         DebugLog(1, L"HttpGet failed: %s", http_err.c_str());
         std::lock_guard<std::mutex> lock(m_mutex);
         m_backoff_sec = std::min(60, (m_backoff_sec == 0 ? 10 : m_backoff_sec * 2));
-        // 标记失败但不清空历史有效数据
+        // 标记失败但不清空历史有效数据（让 Tooltip 可观察错误）
+        Quote err{};
+        err.symbol = m_setting_data.active_symbol;
+        err.is_ok = false;
+        err.error = http_err;
+        err.update_time = time(nullptr);
+        m_quotes[err.symbol] = err;
         RebuildRenderCacheLocked();
         return false;
     }
@@ -516,6 +542,12 @@ bool CDataManager::RequestRealtimeQuotes()
         DebugLog(1, L"ParseBinance24hr failed: %s", parse_err.c_str());
         std::lock_guard<std::mutex> lock(m_mutex);
         m_backoff_sec = std::min(60, (m_backoff_sec == 0 ? 10 : m_backoff_sec * 2));
+        Quote err{};
+        err.symbol = m_setting_data.active_symbol;
+        err.is_ok = false;
+        err.error = parse_err;
+        err.update_time = time(nullptr);
+        m_quotes[err.symbol] = err;
         RebuildRenderCacheLocked();
         return false;
     }
