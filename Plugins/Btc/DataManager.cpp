@@ -18,7 +18,8 @@
 namespace
 {
     constexpr auto kUserAgent = L"TrafficMonitorPlugins-Btc/0.1";
-    constexpr DWORD kInternetFlags = INTERNET_FLAG_TRANSFER_ASCII | INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_SECURE;
+    constexpr DWORD kInternetFlags = INTERNET_FLAG_TRANSFER_ASCII | INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_SECURE | INTERNET_FLAG_NO_UI;
+    constexpr size_t kMaxHttpTraceBodyBytes = 256 * 1024; // 防止异常响应导致 trace 文件过大
 
     std::wstring SanitizeOneLine(const std::wstring& s)
     {
@@ -48,6 +49,156 @@ namespace
         while (!out.empty() && out.back() == L' ')
             out.pop_back();
         return out;
+    }
+
+    std::wstring RedactUrlForLog(std::wstring url)
+    {
+        // 仅用于日志/trace：隐藏 api_key/token 等敏感信息
+        // 简化处理：匹配常见参数名并将值替换为 "***"
+        const std::wstring keys[] = { L"api_key", L"apikey", L"token", L"access_token" };
+        for (const auto& key : keys)
+        {
+            std::wstring needle = key + L"=";
+            size_t pos = 0;
+            while ((pos = url.find(needle, pos)) != std::wstring::npos)
+            {
+                size_t value_start = pos + needle.size();
+                size_t value_end = url.find_first_of(L"&\r\n", value_start);
+                if (value_end == std::wstring::npos)
+                    value_end = url.size();
+                url.replace(value_start, value_end - value_start, L"***");
+                pos = value_start + 3;
+            }
+        }
+        return url;
+    }
+
+    std::wstring FormatWinInetErrorMessage(DWORD error_code)
+    {
+        if (error_code == 0)
+            return L"";
+
+        wchar_t buf[512]{};
+        DWORD flags = FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS;
+        DWORD len = FormatMessageW(flags, nullptr, error_code, 0, buf, _countof(buf), nullptr);
+        if (len > 0)
+        {
+            std::wstring s = buf;
+            // trim
+            while (!s.empty() && (s.back() == L'\r' || s.back() == L'\n' || s.back() == L' '))
+                s.pop_back();
+            return s;
+        }
+        return L"";
+    }
+
+    std::wstring GetWinInetExtendedErrorText()
+    {
+        DWORD err = 0;
+        DWORD len = 0;
+        wchar_t dummy = 0;
+        InternetGetLastResponseInfoW(&err, &dummy, &len);
+        if (len == 0)
+            return L"";
+
+        std::wstring s;
+        s.resize(len);
+        if (!InternetGetLastResponseInfoW(&err, &s[0], &len))
+            return L"";
+
+        // len includes the terminating null per docs; trim it
+        if (!s.empty() && s.back() == L'\0')
+            s.pop_back();
+        return s;
+    }
+
+    std::string WideToUtf8(const std::wstring& w)
+    {
+        if (w.empty())
+            return {};
+        int needed = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), nullptr, 0, nullptr, nullptr);
+        if (needed <= 0)
+            return {};
+        std::string out;
+        out.resize((size_t)needed);
+        WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), &out[0], needed, nullptr, nullptr);
+        return out;
+    }
+
+    struct HttpDebugInfo
+    {
+        std::wstring url_redacted;
+        std::wstring request_headers;
+        DWORD status{};
+        std::wstring response_headers;
+        DWORD wininet_error{};
+        DWORD last_error{};
+        std::wstring extended_error;
+        std::wstring stage;
+        size_t body_bytes{};
+    };
+
+    void DumpHttpTraceFile(const std::wstring& path, const HttpDebugInfo& info, const std::string& body)
+    {
+        if (path.empty())
+            return;
+
+        std::ofstream file(path, std::ios::binary);
+        if (!file)
+            return;
+
+        const unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
+        file.write((const char*)bom, sizeof(bom));
+
+        std::wstringstream wss;
+        wss << L"URL: " << info.url_redacted << L"\n";
+        wss << L"Stage: " << info.stage << L"\n";
+        wss << L"Status: " << info.status << L"\n";
+        if (info.wininet_error != 0 || info.last_error != 0)
+        {
+            wss << L"WinInetError: " << info.wininet_error;
+            std::wstring emsg = FormatWinInetErrorMessage(info.wininet_error);
+            if (!emsg.empty())
+                wss << L" (" << emsg << L")";
+            wss << L"\n";
+            wss << L"LastError: " << info.last_error;
+            std::wstring lmsg = FormatWinInetErrorMessage(info.last_error);
+            if (!lmsg.empty())
+                wss << L" (" << lmsg << L")";
+            wss << L"\n";
+        }
+        if (!info.extended_error.empty())
+            wss << L"Extended: " << SanitizeOneLine(info.extended_error) << L"\n";
+
+        if (!info.request_headers.empty())
+        {
+            wss << L"\n----- Request Headers -----\n";
+            wss << info.request_headers;
+            if (!info.request_headers.empty() && info.request_headers.back() != L'\n')
+                wss << L"\n";
+        }
+        if (!info.response_headers.empty())
+        {
+            wss << L"\n----- Response Headers -----\n";
+            wss << info.response_headers;
+            if (!info.response_headers.empty() && info.response_headers.back() != L'\n')
+                wss << L"\n";
+        }
+
+        wss << L"\n----- Body (" << (unsigned long long)body.size() << L" bytes) -----\n";
+        std::string header_utf8 = WideToUtf8(wss.str());
+        file.write(header_utf8.data(), (std::streamsize)header_utf8.size());
+
+        if (!body.empty())
+        {
+            const size_t to_write = (std::min)(body.size(), kMaxHttpTraceBodyBytes);
+            file.write(body.data(), (std::streamsize)to_write);
+            if (to_write < body.size())
+            {
+                const std::string tail = "\n\n[Truncated]\n";
+                file.write(tail.data(), (std::streamsize)tail.size());
+            }
+        }
     }
 
     long long GetFileSizeBytes(const std::wstring& path)
@@ -198,16 +349,30 @@ namespace
             << L"log_enabled = false\n"
             << L"log_level = 1\n"
             << L"; dump_last_response: 保存最近一次 HTTP 响应到 <dllname>.last_response.json\n"
+            << L";                    同时保存请求/响应信息到 <dllname>.last_http.txt（包含 URL/状态码/响应头/响应体）\n"
             << L"dump_last_response = false\n"
             << L"; show_bounds: 在任务栏绘制边框辅助调试\n"
             << L"show_bounds = false\n";
         return wss.str();
     }
 
-    bool HttpGet(const std::wstring& url, std::string& out, std::wstring& error)
+    bool HttpGet(const std::wstring& url, const std::wstring& request_headers, std::string& out, std::wstring& error, HttpDebugInfo* debug)
     {
         out.clear();
         error.clear();
+
+        if (debug)
+        {
+            debug->url_redacted = RedactUrlForLog(url);
+            debug->request_headers = request_headers;
+            debug->status = 0;
+            debug->response_headers.clear();
+            debug->wininet_error = 0;
+            debug->last_error = 0;
+            debug->extended_error.clear();
+            debug->stage = L"init";
+            debug->body_bytes = 0;
+        }
 
         CInternetSession session(kUserAgent);
         session.SetOption(INTERNET_OPTION_CONNECT_TIMEOUT, 5000);
@@ -217,25 +382,48 @@ namespace
         CHttpFile* file = nullptr;
         try
         {
-            file = (CHttpFile*)session.OpenURL(url.c_str(), 1, kInternetFlags);
+            if (debug)
+                debug->stage = L"open_url";
+
+            CString headers(request_headers.c_str());
+            file = (CHttpFile*)session.OpenURL(url.c_str(), 1, kInternetFlags, headers, (DWORD)headers.GetLength());
             DWORD status{};
             file->QueryInfoStatusCode(status);
-            if (status != HTTP_STATUS_OK)
+            if (debug)
             {
-                error = L"HTTP ";
-                error += std::to_wstring(status);
-                file->Close();
-                delete file;
-                session.Close();
-                return false;
+                debug->status = status;
+                debug->stage = L"query_status";
+                CString raw_headers;
+                if (file->QueryInfo(HTTP_QUERY_RAW_HEADERS_CRLF, raw_headers))
+                    debug->response_headers = raw_headers.GetString();
             }
 
             // 使用二进制读取避免 Unicode/ANSI CString 转换导致的编码问题
+            if (debug)
+                debug->stage = L"read_body";
             char buf[4096];
             UINT nRead{};
             while ((nRead = file->Read(buf, sizeof(buf))) > 0)
             {
                 out.append(buf, buf + nRead);
+            }
+            if (debug)
+                debug->body_bytes = out.size();
+
+            if (status != HTTP_STATUS_OK)
+            {
+                error = L"HTTP ";
+                error += std::to_wstring(status);
+                if (!out.empty())
+                {
+                    error += L" (";
+                    error += std::to_wstring((unsigned long long)out.size());
+                    error += L" bytes)";
+                }
+                file->Close();
+                delete file;
+                session.Close();
+                return false;
             }
             file->Close();
             delete file;
@@ -247,6 +435,13 @@ namespace
             wchar_t msg[256]{};
             e->GetErrorMessage(msg, _countof(msg));
             error = msg;
+            if (debug)
+            {
+                debug->stage = L"exception";
+                debug->wininet_error = e->m_dwError;
+                debug->last_error = GetLastError();
+                debug->extended_error = GetWinInetExtendedErrorText();
+            }
             e->Delete();
         }
 
@@ -517,6 +712,7 @@ void CDataManager::LoadConfig(const std::wstring& config_dir)
     m_config_path = base_dir + module_file_name + L".ini";
     m_log_path = base_dir + module_file_name + L".log";
     m_last_response_path = base_dir + module_file_name + L".last_response.json";
+    m_last_http_trace_path = base_dir + module_file_name + L".last_http.txt";
 
     // 首次运行自动生成模板（带注释），便于直接修改
     if (!FileExists(m_config_path))
@@ -1522,6 +1718,8 @@ bool CDataManager::RequestRealtimeQuotes()
     std::wstring cryptocompare_base_url;
     std::wstring cryptocompare_api_key;
     bool dump_last_response{};
+    bool debug_log_enabled{};
+    int debug_log_level{};
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         EnsureDefaultsLocked();
@@ -1532,6 +1730,8 @@ bool CDataManager::RequestRealtimeQuotes()
         cryptocompare_base_url = m_setting_data.cryptocompare_base_url;
         cryptocompare_api_key = m_setting_data.cryptocompare_api_key;
         dump_last_response = m_setting_data.debug_dump_last_response;
+        debug_log_enabled = m_setting_data.debug_log_enabled;
+        debug_log_level = m_setting_data.debug_log_level;
     }
     if (symbols.empty())
         return false;
@@ -1585,9 +1785,40 @@ bool CDataManager::RequestRealtimeQuotes()
 
     std::string body;
     std::wstring http_err;
-    if (!HttpGet(url, body, http_err))
+    const std::wstring request_headers =
+        L"Accept: application/json\r\n"
+        L"Accept-Encoding: identity\r\n"
+        L"Connection: close\r\n"
+        L"Cache-Control: no-cache\r\n"
+        L"Pragma: no-cache\r\n";
+
+    HttpDebugInfo http_debug{};
+    HttpDebugInfo* dbg_ptr = (dump_last_response || (debug_log_enabled && debug_log_level >= 2)) ? &http_debug : nullptr;
+    if (debug_log_enabled && debug_log_level >= 2)
+        DebugLog(2, L"HttpGet: %s", RedactUrlForLog(url).c_str());
+
+    if (!HttpGet(url, request_headers, body, http_err, dbg_ptr))
     {
-        DebugLog(1, L"HttpGet failed: %s", http_err.c_str());
+        if (dump_last_response && dbg_ptr)
+            DumpHttpTraceFile(m_last_http_trace_path, http_debug, body);
+
+        if (dbg_ptr && (http_debug.status != 0 || http_debug.wininet_error != 0 || http_debug.last_error != 0))
+        {
+            DebugLog(
+                1,
+                L"HttpGet failed: %s | status=%u wininet=%lu last=%lu stage=%s",
+                http_err.c_str(),
+                http_debug.status,
+                (unsigned long)http_debug.wininet_error,
+                (unsigned long)http_debug.last_error,
+                http_debug.stage.c_str());
+            if (dump_last_response && !m_last_http_trace_path.empty())
+                DebugLog(1, L"Http trace saved: %s", m_last_http_trace_path.c_str());
+        }
+        else
+        {
+            DebugLog(1, L"HttpGet failed: %s", http_err.c_str());
+        }
         std::lock_guard<std::mutex> lock(m_mutex);
         m_backoff_sec = (std::min)(60, (m_backoff_sec == 0 ? 10 : m_backoff_sec * 2));
         // 标记失败但不清空历史有效数据（让 Tooltip 可观察错误）
@@ -1600,6 +1831,9 @@ bool CDataManager::RequestRealtimeQuotes()
         RebuildRenderCacheLocked();
         return false;
     }
+
+    if (dump_last_response && dbg_ptr)
+        DumpHttpTraceFile(m_last_http_trace_path, http_debug, body);
 
     std::map<std::wstring, Quote> parsed;
     std::wstring parse_err;

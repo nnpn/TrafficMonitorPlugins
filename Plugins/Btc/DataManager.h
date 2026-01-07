@@ -239,6 +239,7 @@ private:
     std::wstring m_config_path;
     std::wstring m_log_path;
     std::wstring m_last_response_path;
+    std::wstring m_last_http_trace_path;
     std::map<UINT, CString> m_string_table;
     std::map<UINT, HICON> m_icons;
     int m_dpi{ 96 };
