@@ -8,6 +8,7 @@
 #include <sstream>
 #include <iomanip>
 #include <cstdarg>
+#include <algorithm>
 #include <afxinet.h>
 
 namespace
@@ -41,12 +42,13 @@ namespace
                 return false;
             }
 
-            CString buffer;
-            CString content;
-            while (file->ReadString(buffer))
-                content += buffer;
-
-            out.assign((const char*)content.GetString());
+            // 使用二进制读取避免 Unicode/ANSI CString 转换导致的编码问题
+            char buf[4096];
+            UINT nRead{};
+            while ((nRead = file->Read(buf, sizeof(buf))) > 0)
+            {
+                out.append(buf, buf + nRead);
+            }
             file->Close();
             delete file;
             session.Close();
@@ -97,8 +99,8 @@ namespace
         }
 
         yyjson_val* val{};
-        size_t idx{};
-        yyjson_arr_foreach(root, idx, val)
+        size_t idx{}, max{};
+        yyjson_arr_foreach(root, idx, max, val)
         {
             if (val == nullptr || !yyjson_is_obj(val))
                 continue;
@@ -699,7 +701,7 @@ void CDataManager::DebugLog(int level, const wchar_t* fmt, ...) const
             {
                 std::string utf8;
                 utf8.resize((size_t)needed);
-                WideCharToMultiByte(CP_UTF8, 0, line.c_str(), (int)line.size(), utf8.data(), needed, nullptr, nullptr);
+                WideCharToMultiByte(CP_UTF8, 0, line.c_str(), (int)line.size(), &utf8[0], needed, nullptr, nullptr);
                 file << utf8;
             }
         }

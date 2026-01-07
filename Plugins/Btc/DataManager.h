@@ -3,7 +3,6 @@
 #include <map>
 #include <vector>
 #include <mutex>
-#include <optional>
 #include <ctime>
 #include "resource.h"
 
