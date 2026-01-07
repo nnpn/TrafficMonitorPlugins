@@ -20,6 +20,36 @@ namespace
     constexpr auto kUserAgent = L"TrafficMonitorPlugins-Btc/0.1";
     constexpr DWORD kInternetFlags = INTERNET_FLAG_TRANSFER_ASCII | INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_SECURE;
 
+    std::wstring SanitizeOneLine(const std::wstring& s)
+    {
+        // 用于 Tooltip / 任务栏单行显示：去掉换行并压缩空白，避免 “)\n” 断行等显示问题
+        std::wstring out;
+        out.reserve(s.size());
+        bool last_space = false;
+        for (wchar_t ch : s)
+        {
+            if (ch == L'\r' || ch == L'\n' || ch == L'\t')
+                ch = L' ';
+            if (ch == L' ')
+            {
+                if (!out.empty() && !last_space)
+                {
+                    out.push_back(L' ');
+                    last_space = true;
+                }
+                continue;
+            }
+            out.push_back(ch);
+            last_space = false;
+        }
+        // trim
+        while (!out.empty() && out.front() == L' ')
+            out.erase(out.begin());
+        while (!out.empty() && out.back() == L' ')
+            out.pop_back();
+        return out;
+    }
+
     bool FileExists(const std::wstring& path)
     {
         DWORD attr = GetFileAttributesW(path.c_str());
@@ -649,8 +679,11 @@ std::wstring CDataManager::FormatCoreLineLocked(const Quote& quote) const
         line += L" --";
         if (!quote.error.empty())
         {
+            const std::wstring err = SanitizeOneLine(quote.error);
+            if (err.empty())
+                return line;
             line += L" (";
-            line += quote.error;
+            line += err;
             line += L')';
         }
         return line;
@@ -779,8 +812,11 @@ std::wstring CDataManager::FormatDetailLineLocked(const Quote& quote) const
         std::wstring line = L"--";
         if (!quote.error.empty())
         {
+            const std::wstring err = SanitizeOneLine(quote.error);
+            if (err.empty())
+                return line;
             line += L" (";
-            line += quote.error;
+            line += err;
             line += L')';
         }
         return line;
@@ -995,7 +1031,11 @@ std::wstring CDataManager::BuildTooltipLocked() const
         {
             wss << L" x";
             if (!q.error.empty())
-                wss << L" (" << q.error << L")";
+            {
+                const std::wstring err = SanitizeOneLine(q.error);
+                if (!err.empty())
+                    wss << L" (" << err << L")";
+            }
         }
         else if (stale)
         {
@@ -1029,7 +1069,11 @@ std::wstring CDataManager::BuildTooltipLocked() const
         if (!q.is_ok)
         {
             if (!q.error.empty())
-                detail_lines.push_back(std::wstring(L"ERROR ") + q.error);
+            {
+                const std::wstring err = SanitizeOneLine(q.error);
+                if (!err.empty())
+                    detail_lines.push_back(std::wstring(L"ERROR ") + err);
+            }
         }
 
         {
@@ -1193,7 +1237,7 @@ bool CDataManager::RequestRealtimeQuotes()
         Quote err{};
         err.symbol = m_setting_data.active_symbol;
         err.is_ok = false;
-        err.error = http_err;
+        err.error = SanitizeOneLine(http_err);
         err.update_time = time(nullptr);
         m_quotes[err.symbol] = err;
         RebuildRenderCacheLocked();
@@ -1221,7 +1265,7 @@ bool CDataManager::RequestRealtimeQuotes()
         Quote err{};
         err.symbol = m_setting_data.active_symbol;
         err.is_ok = false;
-        err.error = parse_err;
+        err.error = SanitizeOneLine(parse_err);
         err.update_time = time(nullptr);
         m_quotes[err.symbol] = err;
         RebuildRenderCacheLocked();

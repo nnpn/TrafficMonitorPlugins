@@ -115,19 +115,24 @@ void CPluginTemplateItem::DrawItem(void* hDC, int x, int y, int w, int h, bool d
 int CPluginTemplateItem::OnMouseEvent(MouseEventType type, int x, int y, void* hWnd, int flag)
 {
     const bool line2_roll_detail = (m_line_index == 1) && g_data.IsLine2RollDetailMode();
+    const bool ctrl_down = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
     switch (type)
     {
     case IPluginItem::MT_WHEEL_UP:
-        if (line2_roll_detail)
+        // 默认：滚轮切换币种（多币种滚动列表）
+        // Ctrl + 滚轮：当第二行处于 roll_detail 模式时切换明细项
+        if (line2_roll_detail && ctrl_down)
             g_data.StepLine2Detail(-1);
         else
             g_data.StepActiveSymbol(-1);
+        ::InvalidateRect((HWND)hWnd, nullptr, TRUE);
         return 1;
     case IPluginItem::MT_WHEEL_DOWN:
-        if (line2_roll_detail)
+        if (line2_roll_detail && ctrl_down)
             g_data.StepLine2Detail(1);
         else
             g_data.StepActiveSymbol(1);
+        ::InvalidateRect((HWND)hWnd, nullptr, TRUE);
         return 1;
     default:
         break;
