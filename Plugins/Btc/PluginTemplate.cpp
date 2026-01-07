@@ -32,17 +32,29 @@ const wchar_t* CPluginTemplate::GetTooltipInfo()
     return m_tooltip_info.c_str();
 }
 
+UINT CPluginTemplate::ThreadCallback(LPVOID)
+{
+    AFX_MANAGE_STATE(AfxGetStaticModuleState());
+    CFlagLocker flag_locker(m_instance.m_is_thread_runing);
+
+    m_instance.m_last_request_time = (unsigned __int64)time(nullptr);
+    g_data.RequestRealtimeQuotes();
+    return 0;
+}
+
+void CPluginTemplate::SendQuoteRequest()
+{
+    if (!m_is_thread_runing) // 确保线程已退出
+        AfxBeginThread(ThreadCallback, nullptr);
+}
+
 void CPluginTemplate::DataRequired()
 {
-    // Phase 1：仅使用模拟数据刷新渲染缓存，确保 UI 行为可验收。
-    static time_t last_tick{};
+    // 轮询触发：根据刷新间隔请求一次报价更新；绘制与 Tooltip 读取缓存即可。
     time_t now = time(nullptr);
-    if (now != last_tick)
-    {
-        last_tick = now;
-        g_data.UpdateMockQuotes();
-        m_tooltip_info = g_data.GetTooltipText();
-    }
+    int interval = g_data.GetUpdateIntervalSec();
+    if (!m_is_thread_runing && (now - (time_t)m_last_request_time) >= interval)
+        SendQuoteRequest();
 }
 
 ITMPlugin::OptionReturn CPluginTemplate::ShowOptionsDialog(void* hParent)
@@ -90,10 +102,39 @@ void CPluginTemplate::OnExtenedInfo(ExtendedInfoIndex index, const wchar_t* data
     case ITMPlugin::EI_CONFIG_DIR:
         //从配置文件读取配置
         g_data.LoadConfig(std::wstring(data));
-        m_tooltip_info = g_data.GetTooltipText();
+        SendQuoteRequest();
         break;
     case ITMPlugin::EI_TASKBAR_WND_VALUE_RIGHT_ALIGN:
         g_data.SetRightAlign((_wtoi(data) != 0));
+        break;
+    default:
+        break;
+    }
+}
+
+int CPluginTemplate::GetCommandCount()
+{
+    return 1;
+}
+
+const wchar_t* CPluginTemplate::GetCommandName(int command_index)
+{
+    switch (command_index)
+    {
+    case 0:
+        return g_data.StringRes(IDS_COMMAND_UPDATE).GetString();
+    default:
+        break;
+    }
+    return nullptr;
+}
+
+void CPluginTemplate::OnPluginCommand(int command_index, void* hWnd, void* para)
+{
+    switch (command_index)
+    {
+    case 0:
+        SendQuoteRequest();
         break;
     default:
         break;

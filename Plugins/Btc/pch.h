@@ -22,5 +22,25 @@
     } \
 } while (false)
 
+/**
+ * @brief 通过构造/析构控制线程运行标志
+ */
+class CFlagLocker
+{
+public:
+    explicit CFlagLocker(bool& flag)
+        : m_flag(flag)
+    {
+        m_flag = true;
+    }
+
+    ~CFlagLocker()
+    {
+        m_flag = false;
+    }
+
+private:
+    bool& m_flag;
+};
 
 #endif //PCH_H

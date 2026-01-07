@@ -131,6 +131,17 @@ public:
      */
     void DebugLog(int level, const wchar_t* fmt, ...) const;
 
+    /**
+     * @brief 拉取并更新报价缓存（网络请求）
+     * @return 成功返回 true；失败返回 false，失败原因可从 Tooltip/日志观察
+     */
+    bool RequestRealtimeQuotes();
+
+    /**
+     * @brief 获取报价刷新间隔（秒）
+     */
+    int GetUpdateIntervalSec() const;
+
     SettingData m_setting_data;
 
 private:
@@ -160,4 +171,8 @@ private:
     std::map<std::wstring, Quote> m_quotes;
     RenderCache m_render_cache;
     bool m_right_align{};
+
+    // 请求与失败退避（Phase 2）
+    time_t m_last_success_time{};
+    int m_backoff_sec{};
 };

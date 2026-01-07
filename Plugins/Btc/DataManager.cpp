@@ -1,10 +1,177 @@
 ﻿#include "pch.h"
 #include "DataManager.h"
 #include "../utilities/IniHelper.h"
+#include "../utilities/Common.h"
+#include "../utilities/JsonHelper.h"
+#include "../utilities/yyjson/yyjson.h"
 #include <fstream>
 #include <sstream>
 #include <iomanip>
 #include <cstdarg>
+#include <afxinet.h>
+
+namespace
+{
+    constexpr auto kUserAgent = L"TrafficMonitorPlugins-Btc/0.1";
+    constexpr DWORD kInternetFlags = INTERNET_FLAG_TRANSFER_ASCII | INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_SECURE;
+
+    bool HttpGet(const std::wstring& url, std::string& out, std::wstring& error)
+    {
+        out.clear();
+        error.clear();
+
+        CInternetSession session(kUserAgent);
+        session.SetOption(INTERNET_OPTION_CONNECT_TIMEOUT, 5000);
+        session.SetOption(INTERNET_OPTION_SEND_TIMEOUT, 5000);
+        session.SetOption(INTERNET_OPTION_RECEIVE_TIMEOUT, 5000);
+
+        CHttpFile* file = nullptr;
+        try
+        {
+            file = (CHttpFile*)session.OpenURL(url.c_str(), 1, kInternetFlags);
+            DWORD status{};
+            file->QueryInfoStatusCode(status);
+            if (status != HTTP_STATUS_OK)
+            {
+                error = L"HTTP ";
+                error += std::to_wstring(status);
+                file->Close();
+                delete file;
+                session.Close();
+                return false;
+            }
+
+            CString buffer;
+            CString content;
+            while (file->ReadString(buffer))
+                content += buffer;
+
+            out.assign((const char*)content.GetString());
+            file->Close();
+            delete file;
+            session.Close();
+            return true;
+        }
+        catch (CInternetException* e)
+        {
+            wchar_t msg[256]{};
+            e->GetErrorMessage(msg, _countof(msg));
+            error = msg;
+            e->Delete();
+        }
+
+        if (file != nullptr)
+        {
+            file->Close();
+            delete file;
+        }
+        session.Close();
+        return false;
+    }
+
+    double ParseDouble(const std::string& s)
+    {
+        if (s.empty())
+            return 0.0;
+        char* end{};
+        double v = strtod(s.c_str(), &end);
+        return (end == s.c_str()) ? 0.0 : v;
+    }
+
+    bool ParseBinance24hr(const std::string& json, std::map<std::wstring, Quote>& out, std::wstring& error)
+    {
+        out.clear();
+        error.clear();
+        yyjson_doc* doc = yyjson_read(json.c_str(), json.size(), 0);
+        if (doc == nullptr)
+        {
+            error = L"json parse failed";
+            return false;
+        }
+        yyjson_val* root = yyjson_doc_get_root(doc);
+        if (root == nullptr || !yyjson_is_arr(root))
+        {
+            yyjson_doc_free(doc);
+            error = L"json root not array";
+            return false;
+        }
+
+        yyjson_val* val{};
+        size_t idx{};
+        yyjson_arr_foreach(root, idx, val)
+        {
+            if (val == nullptr || !yyjson_is_obj(val))
+                continue;
+
+            std::string symbol = utilities::JsonHelper::GetJsonString(val, "symbol");
+            if (symbol.empty())
+                continue;
+
+            Quote q{};
+            q.symbol = utilities::StringHelper::StrToUnicode(symbol.c_str(), true);
+            q.last = ParseDouble(utilities::JsonHelper::GetJsonString(val, "lastPrice"));
+            q.change = ParseDouble(utilities::JsonHelper::GetJsonString(val, "priceChange"));
+            q.change_pct = ParseDouble(utilities::JsonHelper::GetJsonString(val, "priceChangePercent"));
+            q.high_24h = ParseDouble(utilities::JsonHelper::GetJsonString(val, "highPrice"));
+            q.low_24h = ParseDouble(utilities::JsonHelper::GetJsonString(val, "lowPrice"));
+            q.volume_24h = ParseDouble(utilities::JsonHelper::GetJsonString(val, "volume"));
+            q.is_ok = (q.last > 0.0);
+
+            yyjson_val* close_time = yyjson_obj_get(val, "closeTime");
+            if (close_time != nullptr && yyjson_is_int(close_time))
+            {
+                long long ms = yyjson_get_sint(close_time);
+                q.update_time = (time_t)(ms / 1000);
+            }
+            else
+            {
+                q.update_time = time(nullptr);
+            }
+            out[q.symbol] = q;
+        }
+
+        yyjson_doc_free(doc);
+        if (out.empty())
+        {
+            error = L"empty quotes";
+            return false;
+        }
+        return true;
+    }
+
+    std::wstring UrlEncodeSymbolsParam(const std::vector<std::wstring>& symbols)
+    {
+        // 构造 Binance symbols 参数：["BTCUSDT","ETHUSDT"] 并做最小 URL 编码
+        std::wstring json = L"[";
+        for (size_t i = 0; i < symbols.size(); ++i)
+        {
+            if (i > 0)
+                json += L",";
+            json += L"\"";
+            json += symbols[i];
+            json += L"\"";
+        }
+        json += L"]";
+
+        std::wstring encoded;
+        encoded.reserve(json.size() * 3);
+        for (wchar_t ch : json)
+        {
+            switch (ch)
+            {
+            case L'[': encoded += L"%5B"; break;
+            case L']': encoded += L"%5D"; break;
+            case L'"': encoded += L"%22"; break;
+            case L',': encoded += L"%2C"; break;
+            case L' ': encoded += L"%20"; break;
+            default:
+                encoded.push_back(ch);
+                break;
+            }
+        }
+        return encoded;
+    }
+}
 
 CDataManager CDataManager::m_instance;
 
@@ -64,8 +231,23 @@ void CDataManager::LoadConfig(const std::wstring& config_dir)
         EnsureDefaultsLocked();
     }
 
-    // Phase 1：没有网络时也可验收 UI 行为
-    UpdateMockQuotes();
+    // 初始化缓存（避免首次绘制为空）
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (const auto& s : m_setting_data.symbols)
+        {
+            if (m_quotes.find(s) == m_quotes.end())
+            {
+                Quote q{};
+                q.symbol = s;
+                q.is_ok = false;
+                q.error = L"loading";
+                q.update_time = time(nullptr);
+                m_quotes[s] = q;
+            }
+        }
+        RebuildRenderCacheLocked();
+    }
 }
 
 void CDataManager::SaveConfig() const
@@ -263,6 +445,7 @@ void CDataManager::RebuildRenderCacheLocked()
     std::wstringstream tip;
     int shown = 0;
     int max_show = m_setting_data.tooltip_max_coins;
+    time_t now = time(nullptr);
     for (const auto& s : symbols)
     {
         if (shown >= max_show)
@@ -276,6 +459,8 @@ void CDataManager::RebuildRenderCacheLocked()
         tip << s << L" | " << FormatPrice(q.last) << L" | " << FormatSignedPct(q.change_pct);
         if (!q.is_ok)
             tip << L" x";
+        else if (q.update_time > 0 && (now - q.update_time) > m_setting_data.stale_threshold_sec)
+            tip << L" *";
         tip << L"\n";
         ++shown;
     }
@@ -283,10 +468,84 @@ void CDataManager::RebuildRenderCacheLocked()
         tip << L"... +" << (symbols.size() - shown) << L" more\n";
 
     tip << L"Interval " << m_setting_data.update_interval_sec << L"s";
+    if (m_backoff_sec > 0)
+        tip << L" | Backoff " << m_backoff_sec << L"s";
     m_render_cache.tooltip = tip.str();
 
     // 样例文本：用于宽度稳定；Phase 3 再按布局动态生成
     m_render_cache.sample = L"BTCUSDT 000000.00 +00.00%";
+}
+
+int CDataManager::GetUpdateIntervalSec() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    int sec = m_setting_data.update_interval_sec;
+    return (sec < 1) ? 1 : sec;
+}
+
+bool CDataManager::RequestRealtimeQuotes()
+{
+    std::vector<std::wstring> symbols;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        EnsureDefaultsLocked();
+        symbols = m_setting_data.symbols;
+    }
+    if (symbols.empty())
+        return false;
+
+    std::wstring url = L"https://api.binance.com/api/v3/ticker/24hr?symbols=";
+    url += UrlEncodeSymbolsParam(symbols);
+
+    std::string body;
+    std::wstring http_err;
+    if (!HttpGet(url, body, http_err))
+    {
+        DebugLog(1, L"HttpGet failed: %s", http_err.c_str());
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_backoff_sec = std::min(60, (m_backoff_sec == 0 ? 10 : m_backoff_sec * 2));
+        // 标记失败但不清空历史有效数据
+        RebuildRenderCacheLocked();
+        return false;
+    }
+
+    std::map<std::wstring, Quote> parsed;
+    std::wstring parse_err;
+    if (!ParseBinance24hr(body, parsed, parse_err))
+    {
+        DebugLog(1, L"ParseBinance24hr failed: %s", parse_err.c_str());
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_backoff_sec = std::min(60, (m_backoff_sec == 0 ? 10 : m_backoff_sec * 2));
+        RebuildRenderCacheLocked();
+        return false;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_backoff_sec = 0;
+        m_last_success_time = time(nullptr);
+
+        // 更新/合并：不在返回里的 symbol 标记为失败
+        for (const auto& s : symbols)
+        {
+            auto it = parsed.find(s);
+            if (it != parsed.end())
+            {
+                m_quotes[s] = it->second;
+            }
+            else
+            {
+                Quote q{};
+                q.symbol = s;
+                q.is_ok = false;
+                q.error = L"no data";
+                q.update_time = time(nullptr);
+                m_quotes[s] = q;
+            }
+        }
+        RebuildRenderCacheLocked();
+    }
+    return true;
 }
 
 void CDataManager::UpdateRenderCache()
