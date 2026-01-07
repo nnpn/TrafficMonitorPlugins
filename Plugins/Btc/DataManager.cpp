@@ -11,6 +11,9 @@
 #include <algorithm>
 #include <afxinet.h>
 
+#undef min
+#undef max
+
 namespace
 {
     constexpr auto kUserAgent = L"TrafficMonitorPlugins-Btc/0.1";
@@ -502,7 +505,7 @@ int CDataManager::GetEffectiveIntervalSec() const
     int base = m_setting_data.update_interval_sec;
     if (base < 1)
         base = 1;
-    return std::max(base, m_backoff_sec);
+    return (std::max)(base, m_backoff_sec);
 }
 
 bool CDataManager::RequestRealtimeQuotes()
@@ -525,7 +528,7 @@ bool CDataManager::RequestRealtimeQuotes()
     {
         DebugLog(1, L"HttpGet failed: %s", http_err.c_str());
         std::lock_guard<std::mutex> lock(m_mutex);
-        m_backoff_sec = std::min(60, (m_backoff_sec == 0 ? 10 : m_backoff_sec * 2));
+        m_backoff_sec = (std::min)(60, (m_backoff_sec == 0 ? 10 : m_backoff_sec * 2));
         // 标记失败但不清空历史有效数据（让 Tooltip 可观察错误）
         Quote err{};
         err.symbol = m_setting_data.active_symbol;
@@ -543,7 +546,7 @@ bool CDataManager::RequestRealtimeQuotes()
     {
         DebugLog(1, L"ParseBinance24hr failed: %s", parse_err.c_str());
         std::lock_guard<std::mutex> lock(m_mutex);
-        m_backoff_sec = std::min(60, (m_backoff_sec == 0 ? 10 : m_backoff_sec * 2));
+        m_backoff_sec = (std::min)(60, (m_backoff_sec == 0 ? 10 : m_backoff_sec * 2));
         Quote err{};
         err.symbol = m_setting_data.active_symbol;
         err.is_ok = false;
